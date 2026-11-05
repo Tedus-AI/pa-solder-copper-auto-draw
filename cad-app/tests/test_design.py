@@ -84,3 +84,13 @@ def test_trial_conflict_and_clearance_visible(data):
     assert r.corner_clearance == pytest.approx(.2828427125)
     assert any("第13頁" in w for w in r.warnings)
     assert any("0.37 mm" in w for w in r.warnings)
+
+
+def test_browser_layout_metadata_roundtrip_preserves_manufacturing_geometry(data):
+    original = calculate(Design.from_mapping(data))
+    data["layout"] = {"border_width": 1.5, "epad_size": 2, "web_width": .4, "hole_clearance": 4}
+    design = Design.from_mapping(data)
+    updated = calculate(design)
+    assert design.to_mapping()["layout"] == data["layout"]
+    assert updated.boss_volume == original.boss_volume
+    assert updated.model_thickness == original.model_thickness

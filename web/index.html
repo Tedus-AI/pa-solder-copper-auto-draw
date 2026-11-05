@@ -1,36 +1,30 @@
 <!doctype html>
 <html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="基地台 final PA 銅塊與錫片自動出圖工具：3D STEP、2D DXF、體積扣除錫厚計算與 Creo 原生參數化任務。">
-  <meta name="theme-color" content="#173b38">
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="PA 銅塊與錫片 CAD 工作區：尺寸定位、3D 參考組裝、STEP/DXF 與 Layout 綠漆圖。"><meta name="theme-color" content="#173b38">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23173f39'/%3E%3Ctext x='6' y='28' fill='%23e3b88e' font-size='23'%3ECu%3C/text%3E%3C/svg%3E">
-  <title>PA Copper CAD｜銅塊與錫片自動出圖</title>
+  <title>PA Copper CAD｜尺寸與出圖工作區</title>
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="./" aria-label="PA Copper CAD 首頁"><span class="brand-mark">Cu<span>29</span></span><span>PA Copper <strong>CAD</strong><small>FINAL PA · 雙迴焊設計工具</small></span></a>
-    <div class="top-links"><span class="local-badge"><i></i>瀏覽器本機建模</span><a href="https://github.com/Tedus-AI/pa-solder-copper-auto-draw/tree/deploy/pa-copper-preform-cad/web" target="_blank" rel="noopener">GitHub ↗</a></div>
-  </header>
-  <main>
-    <section class="intro"><div><span class="eyebrow">FROM PARAMETERS TO PARTS</span><h1>銅塊與錫片，自動出圖。</h1><p>輸入封裝與板件尺寸，完成凸台建模、錫厚計算與工程圖匯出。</p></div><div class="workflow"><span>01 設定尺寸</span><b>→</b><span>02 建立實體</span><b>→</b><span>03 匯出圖檔</span></div></section>
-    <div class="workspace">
-      <aside class="panel controls"><div class="panel-heading"><h2>設計參數</h2><span>mm</span></div>
-        <div class="config-tools"><button id="reset" type="button">載入範例</button><button id="import" type="button">匯入 YAML / JSON</button><input id="import-file" type="file" accept=".yaml,.yml,.json" hidden></div>
-        <form id="design-form"><label class="name-field">設計名稱<input name="name" id="name" value="pa_780_m1p" required maxlength="40" pattern="[A-Za-z][A-Za-z0-9_\-]{0,39}"></label><div id="fields"></div><div class="form-footer"><button id="generate" class="primary" type="submit"><span>建立模型並計算</span><span>↗</span></button><p>資料與幾何運算皆在你的瀏覽器內完成。</p></div></form>
-      </aside>
-      <section class="results-column">
-        <div class="metrics" aria-live="polite"><article><span>銅塊凸台總高 CuH</span><strong id="metric-cuh">—</strong><small>mm</small></article><article class="featured"><span>錫片計算厚度 Z</span><strong id="metric-z">—</strong><small>mm</small></article><article><span>模型錫片厚度</span><strong id="metric-model">—</strong><small>mm</small></article><article><span>所需錫料體積</span><strong id="metric-volume">—</strong><small>mm³</small></article></div>
-        <section class="panel viewer-panel"><div class="viewer-toolbar"><div class="part-tabs" role="group" aria-label="模型選擇"><button id="tab-copper" type="button" class="active">銅塊</button><button id="tab-preform" type="button">錫片</button></div><div class="view-tools"><button id="view-iso" type="button">等角</button><button id="view-top" type="button">俯視</button><span>mm · 1:1</span></div></div><div id="viewer"><div id="viewer-placeholder">載入 CAD 引擎，準備建立實體…</div><span class="viewer-hint">拖曳旋轉 · 滾輪縮放 · 右鍵平移</span><div class="axis-key"><b>X</b><b>Y</b><b>Z</b></div></div><div class="viewer-status"><span id="status" role="status" aria-live="polite">準備中</span><span id="model-size"></span></div></section>
-        <div id="error" role="alert" hidden></div>
-        <section class="panel export-panel"><div><h2>出圖與下載</h2><p>銅塊、錫片與計算報告，一次打包。</p></div><div class="export-actions"><button id="download-dxf" class="secondary" disabled>目前零件 DXF</button><button id="download-step" class="secondary" disabled>目前零件 STEP</button><button id="download-zip" class="primary" disabled>下載完整出圖包 ↓</button></div></section>
-        <div class="lower-grid"><section class="panel calculation"><div class="panel-heading"><h2>錫量計算</h2><span>體積扣除法</span></div><div class="formula"><span>填錫空間 V₁₋₁</span><strong id="v-cavity">—</strong><i>−</i><span>銅凸台 V₂</span><strong id="v-boss">—</strong><i>÷</i><span>錫片面積 A₁</span><strong id="v-area">—</strong></div><div class="trial-row"><span>三款試作厚度</span><strong id="trials">—</strong></div></section><section class="panel native-info"><span class="native-badge">CREO 7 · WINDOWS 11</span><h2>原生 PRT，保留特徵樹。</h2><p>出圖包包含原生參數化任務與本機執行工具。PRT 須在已授權的 Creo 與原生母檔上產生，完成本機驗證後交付。</p><a href="./WINDOWS_CREO7.md" target="_blank" id="creo-guide">查看原生母檔與執行規格 ↗</a></section></div>
-        <details class="panel engineering"><summary>設計依據與待確認項目 <span>工程註記</span></summary><ul id="warnings"></ul><p>依《PA銅塊焊接雙迴焊製程設計規範_20260319》；基座 40 × 30 mm 為示範值，需以實際 thermal／RF 結果替換。STEP 為3D實體，DXF 為1:1名義尺寸圖。</p></details>
+  <header class="topbar"><a class="brand" href="./"><span class="brand-mark">Cu</span><strong>PA Copper CAD</strong><span class="brand-subtitle">雙迴焊尺寸與出圖</span></a><nav><span class="local-badge"><i></i>瀏覽器本機建模</span><button id="help-open" type="button">計算／設計說明</button><a href="https://github.com/Tedus-AI/pa-solder-copper-auto-draw/tree/main/web" target="_blank" rel="noopener">GitHub ↗</a></nav></header>
+  <main><div class="workspace">
+    <aside class="panel controls">
+      <div class="control-heading"><h1>設計尺寸 <small>mm</small></h1><div class="config-tools"><button id="reset" type="button">範例</button><button id="import" type="button">匯入參數</button><input id="import-file" type="file" accept=".yaml,.yml,.json" hidden></div></div>
+      <form id="design-form"><label class="name-field"><span>設計名稱</span><input name="name" id="name" value="pa_780_m1p" required maxlength="40" pattern="[A-Za-z][A-Za-z0-9_\-]{0,39}"></label><div id="fields"></div><div class="form-footer"><span>點選數值 → 右側尺寸定位與呼吸標記</span><button id="generate" class="primary" type="submit">建立出圖模型 ↗</button></div></form>
+    </aside>
+    <section class="results-column">
+      <div class="metrics" aria-live="polite"><article><span>銅塊 CuH</span><strong id="metric-cuh">—</strong><small>mm</small></article><article class="featured"><span>計算錫厚 Z</span><strong id="metric-z">—</strong><small>mm</small></article><article><span>模型錫厚</span><strong id="metric-model">—</strong><small>mm</small></article><article><span>所需錫量</span><strong id="metric-volume">—</strong><small>mm³</small></article></div>
+      <section class="panel viewer-panel"><div class="viewer-toolbar"><div class="part-tabs" role="group" aria-label="顯示模式"><button id="tab-assembly" class="active" type="button">參考組裝</button><button id="tab-copper" type="button">銅塊</button><button id="tab-preform" type="button">錫片</button><button id="tab-layout" type="button">Layout</button></div><div class="reference-tools"><label><input id="ref-pcb" type="checkbox" checked>PCB</label><label><input id="ref-pa" type="checkbox" checked>PA</label><label title="僅顯示分解；點選尺寸會回到真實裝配位置"><input id="explode" type="checkbox">分解</label></div><div class="view-tools"><button id="view-iso" type="button">等角</button><button id="view-top" type="button">俯視</button><button id="view-front" type="button">正視</button></div></div>
+        <div id="viewer"><div id="viewer-placeholder">載入瀏覽器 CAD 引擎…</div><div id="dimension-label" hidden><div><strong id="dimension-title"></strong><button id="dimension-clear" type="button" aria-label="清除尺寸定位">×</button></div><span id="dimension-context"></span></div><span class="viewer-hint">拖曳旋轉 · 滾輪縮放 · 右鍵平移</span><div class="axis-key"><b>X</b><b>Y</b><b>Z</b></div></div>
+        <div class="reference-note"><span id="reference-note">PCB／PA 僅位置參考，不參與3D出圖</span><span id="model-size"></span></div><div class="viewer-status"><span id="status" role="status" aria-live="polite">準備中</span><span id="preview-state">即時預覽</span></div>
       </section>
-    </div>
-  </main>
-  <footer><span>PA Copper CAD <b>／</b> mm · mm² · mm³</span><span>靜態 HTML / JavaScript · GitHub Pages <b>／</b> <a href="./THIRD_PARTY_LICENSES.txt">開源元件</a></span></footer>
+      <div id="error" role="alert" hidden></div>
+      <section class="panel export-panel"><div class="part-export"><label for="export-part">出圖零件</label><select id="export-part"><option value="copper">銅塊</option><option value="preform">錫片</option></select><button id="download-dxf" class="secondary" disabled>DXF</button><button id="download-step" class="secondary" disabled>STEP</button></div><div class="export-actions"><button id="download-layout" class="secondary layout-button" disabled>Layout 綠漆 DXF ↓</button><button id="download-zip" class="primary" disabled>完整出圖包 ↓</button></div><p id="layout-summary"></p></section>
+      <div class="quick-calculation"><span>體積扣除 <strong id="v-cavity">—</strong> − <strong id="v-boss">—</strong> ÷ A₁ <strong id="v-area">—</strong></span><span>試片 <strong id="trials">—</strong></span></div>
+    </section>
+  </div></main>
+  <dialog id="help-dialog"><div class="dialog-title"><h2>計算與設計說明</h2><button id="help-close" type="button" aria-label="關閉說明">×</button></div><h3>參考組裝與出圖範圍</h3><p>PCB 顯示局部板件與破孔；PA casing／flange 厚度僅作示意，SPH 定位引腳底面。PCB、PA 與分解位移都不參與 STEP／STL 出圖。真正的3D出圖零件只有銅塊與錫片。</p><h3>Layout 綠漆／E-PAD · 原文件第9頁</h3><p>R＝外圍綠漆寬、S＝E-PAD 邊長、T＝格間綠漆、U＝PCB 開窗、V＝定位孔避讓直徑。陣列以開孔中心對齊，邊界與孔位依銅塊外形裁切。</p><p>DXF 的 SOLDER_MASK 為綠漆覆蓋區；EPAD_OPENING 為裸露 E-PAD 開窗。外框 R 依圖解讀為銅塊外側綠漆帶；定位孔 D 至 V 間保留綠漆環。曲線裁切弦差≤0.001 mm。邊緣落在綠漆筋時，請與 Layout 確認收邊。</p><p>PCB relief 依第7／9頁的側向半圓示意；錫厚計算保留第12頁 πr² 等效體積公式，兩者不互相取代。</p><h3>工程待確認項目</h3><ul id="warnings"></ul><h3>原生參數化 PRT</h3><p>需在已授權的 Creo Parametric 7.0.10.0／Windows 11 與真實原生母檔上執行。網站提供任務與 runner，尚未完成原生 PRT 實機驗證。</p><a id="creo-guide" href="./WINDOWS_CREO7.md" target="_blank">查看母檔與本機執行規格 ↗</a><p class="credits"><a href="./THIRD_PARTY_LICENSES.txt">開源元件</a> · 靜態 HTML／JavaScript · GitHub Pages</p></dialog>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

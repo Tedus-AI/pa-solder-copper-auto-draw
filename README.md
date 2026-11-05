@@ -10,6 +10,8 @@
 
 網頁原始碼在 `web/`，部署與測試方式見 [DEPLOYMENT.md](DEPLOYMENT.md)。以下保留原始 Python CLI 使用說明。
 
+桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、PCB／PA參考組裝，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
+
 5G RRU PA（功率放大器）焊料 / Copper Coin 自動出圖工具。
 
 輸入 PA 封裝與設計參數（YAML），自動計算並輸出：

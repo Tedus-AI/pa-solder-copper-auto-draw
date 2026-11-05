@@ -5,6 +5,7 @@ export const defaults = {
   copper: { base_length: 40, base_width: 30, base_thickness: 3, corner_radius: 3, hole_diameter: 3, hole_edge_offset: 4, pad_size: 1.5 },
   stack: { lead_solder: .1, board_solder: .1, flange_gap: .3, pad_height: .15 },
   preform: { chamfer: 3.4, trial_delta: .05, thickness_override: null },
+  layout: { border_width: 1, epad_size: 1.5, web_width: .3, hole_clearance: 4 },
 };
 
 export const fields = {
@@ -13,6 +14,7 @@ export const fields = {
   copper: ['銅塊尺寸', { base_length: '基座長度 E', base_width: '基座寬度 F', base_thickness: '基座厚度 G', corner_radius: '四角半徑 R', hole_diameter: '吊掛孔直徑 D', hole_edge_offset: '孔中心距邊 C', pad_size: '小凸台邊長 J' }],
   stack: ['高度堆疊', { lead_solder: '引腳下方錫厚 A', board_solder: '銅塊／PCB 間錫厚 B', flange_gap: 'Flange 至大凸台 D', pad_height: '小凸台高度 K' }],
   preform: ['錫片設計', { chamfer: '45° 削角 Y', trial_delta: '試片厚度增減量', thickness_override: '指定厚度（留空自動）' }],
+  layout: ['綠漆／E-PAD', { border_width: '外框綠漆 R', epad_size: 'E-PAD 邊長 S', web_width: '格間綠漆 T', hole_clearance: '定位孔避讓 V' }],
 };
 
 const zero = new Set(['max_tolerance', 'placement_accuracy', 'opening_tolerance', 'lead_solder', 'board_solder', 'flange_gap', 'trial_delta']);
@@ -54,6 +56,8 @@ export function calculate(input) {
   check(off >= c.corner_radius && off > rad && 2 * off < Math.min(c.base_length, c.base_width), '吊掛孔邊距不足，或孔位不在基座內。');
   const hx = c.base_length / 2 - off, hy = c.base_width / 2 - off;
   check(Math.hypot(Math.max(hx - I / 2, 0), Math.max(hy - H / 2, 0)) > rad, '吊掛孔與大凸台相交。');
+  check(d.layout.hole_clearance >= c.hole_diameter, 'Layout 定位孔避讓 V 不可小於實際吊掛孔直徑。');
+  check(d.layout.epad_size > 0 && d.layout.web_width > 0, 'E-PAD 與格間綠漆尺寸須大於零。');
   const cavity = (b.opening_length * b.opening_width + Math.PI * (b.relief_diameter / 2) ** 2) * gap;
   const boss = I * H * (L - s.pad_height) + 4 * c.pad_size ** 2 * s.pad_height;
   const volume = cavity - boss, area = I * H - 2 * t.chamfer ** 2;

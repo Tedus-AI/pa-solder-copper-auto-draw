@@ -1,74 +1,110 @@
 import './style.css';
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { zipSync, strToU8 } from 'fflate';
 import { parse, stringify } from 'yaml';
 import { defaults, fields, calculate, nativeJob } from './design.js';
 import { drawing } from './dxf.js';
+import { layoutGeometry, layoutDxf } from './layout.js';
+import { CADViewer } from './viewer.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
-let worker, pending, counter = 0, revision = 0, result = null, part = 'copper', busy = false;
-const downloadButtons = ['download-zip', 'download-dxf', 'download-step'];
-$('creo-guide').href = `${base}WINDOWS_CREO7.md`;
+let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
+let layoutKey='', cachedLayout=null;
+const downloadButtons=['download-zip','download-dxf','download-step'];
+$('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 
-for (const [group, [title, names]] of Object.entries(fields)) {
-  const details = document.createElement('details');
-  details.className = 'control-group'; details.open = ['package', 'pcb', 'copper'].includes(group);
-  const summary = document.createElement('summary'); summary.textContent = title; details.append(summary);
-  const grid = document.createElement('div'); grid.className = 'field-grid';
-  for (const [key, title] of Object.entries(names)) {
-    const label = document.createElement('label'); label.textContent = title;
-    const input = document.createElement('input');
-    input.type = 'number'; input.name = `${group}.${key}`; input.id = `${group}-${key}`;
-    input.step = 'any'; input.min = '0'; input.max = '10000'; input.inputMode = 'decimal';
-    input.required = key !== 'thickness_override'; input.value = defaults[group][key] ?? '';
-    input.setAttribute('aria-label', `${title} mm`); label.append(input); grid.append(label);
+const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
+  for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
+  $('ref-pcb').checked=refs.pcb;$('ref-pa').checked=refs.pa;$('explode').checked=exploded;
+  $('reference-note').textContent=mode==='assembly'?'PCB／PA 僅位置參考，不參與3D出圖':mode==='layout'?'綠色＝綠漆覆蓋；灰色＝E-PAD開窗，單獨輸出Layout DXF':'目前零件的3D出圖預覽';
+},dimension=>{
+  document.querySelectorAll('.dimension-active').forEach(el=>el.classList.remove('dimension-active'));
+  $('dimension-label').hidden=!dimension;
+  if(dimension){
+    const [group,key]=dimension.key.split('.');
+    const title=fields[group][1][key];
+    $('dimension-title').textContent=`${title} · ${dimension.label}`;
+    $('dimension-context').textContent=dimension.note;
+    document.querySelector(`input[name="${dimension.key}"]`)?.closest('label').classList.add('dimension-active');
   }
-  details.append(grid); $('fields').append(details);
-}
-
-function formValues() {
-  const d = { name: $('name').value.trim() };
-  for (const [group, [, names]] of Object.entries(fields)) {
-    d[group] = {};
-    for (const key of Object.keys(names)) {
-      const v = $(`${group}-${key}`).value;
-      if (!v && key !== 'thickness_override') throw new Error(`${names[key]} 不可留空。`);
-      d[group][key] = v === '' ? null : Number(v);
-    }
-  }
-  return d;
-}
-
-function fill(d) {
-  $('name').value = d.name;
-  for (const [group, [, names]] of Object.entries(fields)) for (const key of Object.keys(names)) $(`${group}-${key}`).value = d[group][key] ?? '';
-}
-
-function status(text) { $('status').textContent = text; }
-function error(message) { $('error').textContent = message; $('error').hidden = !message; }
-function invalidate() {
-  revision++; result = null; error('');
-  downloadButtons.forEach(id => $(id).disabled = true);
-  document.body.classList.remove('ready'); $('viewer').dataset.ready = 'false';
-  clearModel(); $('viewer-placeholder').hidden = false; $('viewer-placeholder').textContent = '參數已變更，請重新建立模型。';
-  $('model-size').textContent = '';
-  for (const id of ['metric-cuh', 'metric-z', 'metric-model', 'metric-volume', 'v-cavity', 'v-boss', 'v-area', 'trials']) $(id).textContent = '—';
-  status('參數已變更，尚未更新模型');
-}
-$('design-form').addEventListener('input', invalidate);
-$('reset').addEventListener('click', () => { fill(structuredClone(defaults)); invalidate(); $('design-form').requestSubmit(); });
-$('import').addEventListener('click', () => $('import-file').click());
-$('import-file').addEventListener('change', async event => {
-  const file = event.target.files[0]; if (!file) return;
-  try {
-    if (file.size > 128 * 1024) throw new Error('參數檔請小於128 KB。');
-    const data = parse(await file.text(), { maxAliasCount: 50 });
-    const r = calculate(data); fill(r.design); invalidate(); $('design-form').requestSubmit();
-  } catch (e) { invalidate(); error(`匯入失敗：${e.message}`); }
-  event.target.value = '';
 });
 
+for(const group of ['package','stack','pcb','copper','preform','layout']){
+  const [title,names]=fields[group],details=document.createElement('details');
+  details.className='control-group';details.open=true;details.dataset.group=group;
+  const summary=document.createElement('summary');summary.textContent=title;details.append(summary);
+  const grid=document.createElement('div');grid.className='field-grid';
+  for(const[key,title]of Object.entries(names)){
+    const label=document.createElement('label');const caption=document.createElement('span');caption.textContent=title;label.append(caption);
+    const input=document.createElement('input');input.type='number';input.name=`${group}.${key}`;input.id=`${group}-${key}`;
+    input.step='any';input.min='0';input.max='10000';input.inputMode='decimal';input.required=key!=='thickness_override';input.value=defaults[group][key]??'';
+    input.setAttribute('aria-label',`${title} mm`);label.append(input);grid.append(label);
+  }
+  details.append(grid);$('fields').append(details);
+}
+function formValues(){
+  const d={name:$('name').value.trim()};
+  for(const[group,[,names]]of Object.entries(fields)){
+    d[group]={};for(const key of Object.keys(names)){
+      const v=$(`${group}-${key}`).value;
+      if(!v&&key!=='thickness_override')throw new Error(`${names[key]} 不可留空。`);
+      d[group][key]=v===''?null:Number(v);
+    }
+  }return d;
+}
+function fill(d){$('name').value=d.name;for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names))$(`${group}-${key}`).value=d[group][key]??'';}
+function status(text){$('status').textContent=text;}
+function error(message){$('error').textContent=message;$('error').hidden=!message;}
+function layoutFor(r){
+  const c=r.design.copper,b=r.design.pcb;
+  const key=JSON.stringify([c.base_length,c.base_width,c.corner_radius,c.hole_diameter,c.hole_edge_offset,b.opening_length,b.opening_width,b.relief_diameter,r.design.layout]);
+  if(key!==layoutKey){cachedLayout=layoutGeometry(r);layoutKey=key;}return cachedLayout;
+}
+function refreshPreview(showError=false){
+  try{
+    const r=calculate(formValues()),layout=layoutFor(r);draft={results:r,layout};
+    viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
+    $('download-layout').disabled=false;$('viewer').dataset.previewValid='true';
+    $('model-size').textContent=`E ${r.design.copper.base_length} × F ${r.design.copper.base_width} · G ${r.design.copper.base_thickness} mm`;
+    return draft;
+  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';$('download-layout').disabled=true;$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
+}
+function invalidate(){
+  revision++;result=null;error('');downloadButtons.forEach(id=>$(id).disabled=true);$('download-layout').disabled=true;
+  document.body.classList.remove('ready');$('viewer').dataset.ready='false';$('preview-state').textContent='即時預覽 · 出圖待更新';
+  clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；按「建立出圖模型」後下載3D零件');},140);
+}
+$('design-form').addEventListener('input',invalidate);
+$('design-form').addEventListener('focusin',event=>{
+  if(event.target.type==='number'){
+    clearTimeout(previewTimer);refreshPreview();viewer.selectDimension(event.target.name);
+  }
+});
+$('reset').addEventListener('click',()=>{fill(structuredClone(defaults));invalidate();$('design-form').requestSubmit();});
+$('import').addEventListener('click',()=>$('import-file').click());
+$('import-file').addEventListener('change',async event=>{
+  const file=event.target.files[0];if(!file)return;
+  try{if(file.size>128*1024)throw new Error('參數檔請小於128 KB。');const r=calculate(parse(await file.text(),{maxAliasCount:50}));fill(r.design);invalidate();$('design-form').requestSubmit();}
+  catch(e){error(`匯入失敗：${e.message}`);}event.target.value='';
+});
+for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
+  viewer.setMode(mode);if(['copper','preform'].includes(mode)){part=mode;$('export-part').value=mode;}
+});
+$('export-part').addEventListener('change',event=>part=event.target.value);
+$('ref-pcb').addEventListener('change',event=>viewer.setReference('pcb',event.target.checked));
+$('ref-pa').addEventListener('change',event=>viewer.setReference('pa',event.target.checked));
+$('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
+for(const view of ['top','iso','front'])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
+$('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
+$('help-open').addEventListener('click',()=>$('help-dialog').showModal());
+$('help-close').addEventListener('click',()=>$('help-dialog').close());
+$('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
+function renderMetrics(r){
+  for(const[id,v,digits]of [['metric-cuh',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
+  $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ')+' mm';
+  $('warnings').replaceChildren(...r.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
+  $('layout-summary').textContent=`R ${r.design.layout.border_width} / S ${r.design.layout.epad_size} / T ${r.design.layout.web_width} / ØV ${r.design.layout.hole_clearance} mm`;
+}
+function layoutReport(g,r){return {rules:r.design.layout,grid_pitch:g.pitch,epad_cells:g.cells.length,epad_area_mm2:g.epad_area,mask_area_mm2:g.mask_area,edge_web_margins_mm:g.boundary_margins,chord_tolerance_mm:g.chord_tolerance,notes:g.notes};}
 function requestModel(design) {
   if (!worker) {
     worker = new Worker(new URL('./cad.worker.js', import.meta.url), { type: 'module' });
@@ -91,94 +127,26 @@ function requestModel(design) {
   });
 }
 
-$('design-form').addEventListener('submit', async event => {
-  event.preventDefault(); if (busy) return;
-  invalidate(); const current = revision;
-  try {
-    const r = calculate(formValues());
-    busy = true; $('generate').disabled = true;
-    $('viewer-placeholder').textContent = '正在瀏覽器內建立實體，首次載入約需數秒…';
-    status('開始建模…');
-    const model = await requestModel(r.design);
-    if (current !== revision) { status('參數已變更，請重新建立模型'); return; }
-    result = model;
-    renderMetrics(model.results); showPart(part);
-    document.body.classList.add('ready'); $('viewer').dataset.ready = 'true';
-    downloadButtons.forEach(id => $(id).disabled = false);
-    status('單一實體 · 體積與 STEP 回讀驗證通過');
-  } catch (e) {
-    if (current === revision) { error(e.message); status('無法建立，請檢查設計參數'); $('viewer-placeholder').textContent = '調整參數後，重新建立模型。'; }
-  } finally { busy = false; $('generate').disabled = false; }
+
+$('design-form').addEventListener('submit',async event=>{
+  event.preventDefault();if(busy)return;clearTimeout(previewTimer);error('');
+  result=null;downloadButtons.forEach(id=>$(id).disabled=true);$('viewer').dataset.ready='false';
+  const valid=refreshPreview(true);if(!valid)return;
+  const current=revision;
+  try{
+    busy=true;$('generate').disabled=true;status('開始建立出圖模型…');
+    const model=await requestModel(valid.results.design);
+    if(current!==revision){status('參數已變更，請重新建立出圖模型');return;}
+    result={...model,layout:valid.layout};draft={results:model.results,layout:valid.layout};
+    viewer.setDesign(model.results,valid.layout,model.parts);renderMetrics(model.results);
+    document.body.classList.add('ready');$('viewer').dataset.ready='true';$('preview-state').textContent='出圖模型已驗證';
+    downloadButtons.forEach(id=>$(id).disabled=false);status('銅塊／錫片：單一實體、體積與 STEP 回讀通過');
+  }catch(e){if(current===revision){error(e.message);status('出圖模型建立失敗；可修正參數後重建');}}
+  finally{busy=false;$('generate').disabled=false;}
 });
-
-function renderMetrics(r) {
-  for (const [id, v, digits] of [['metric-cuh', r.boss_total_height, 4], ['metric-z', r.calculated_thickness, 6], ['metric-model', r.model_thickness, 6], ['metric-volume', r.solder_volume, 3], ['v-cavity', r.cavity_volume, 3], ['v-boss', r.boss_volume, 3], ['v-area', r.preform_area, 3]]) $(id).textContent = v.toFixed(digits);
-  $('trials').textContent = r.trial_thicknesses.map(v => v.toFixed(4)).join(' / ') + ' mm';
-  $('warnings').replaceChildren(...r.warnings.map(message => { const li = document.createElement('li'); li.textContent = message; return li; }));
-}
-
-const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(35, 1, .01, 10000);
-camera.up.set(0, 0, 1);
-let renderer, controls, group = null, scale = 40, target = new THREE.Vector3(0, 0, 0);
-try {
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.setClearColor(0x000000, 0); $('viewer').prepend(renderer.domElement);
-  controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true;
-  controls.dampingFactor = .1; controls.minDistance = .2; controls.maxDistance = 3000;
-  scene.add(new THREE.HemisphereLight(0xffffff, 0xb2bba3, 2.2));
-  const light = new THREE.DirectionalLight(0xffffff, 3.3); light.position.set(20, -25, 50); scene.add(light);
-  const fillLight = new THREE.DirectionalLight(0xffffff, 1.6); fillLight.position.set(-30, 20, 15); scene.add(fillLight);
-  const grid = new THREE.GridHelper(100, 20, 0xd9dfcf, 0xe6eadf); grid.rotation.x = Math.PI / 2; grid.position.z = -.08; scene.add(grid);
-  const resize = () => { const { width, height } = $('viewer').getBoundingClientRect(); camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height); };
-  new ResizeObserver(resize).observe($('viewer')); resize();
-  const animate = () => { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); }; animate();
-} catch { renderer = null; }
-
-function clearModel() {
-  if (group) { scene.remove(group); group.traverse(o => { o.geometry?.dispose(); if (o.material) o.material.dispose(); }); group = null; }
-  $('viewer').querySelector('svg')?.remove();
-}
-
-function setView(top = false) {
-  if (!renderer || !controls) return;
-  controls.target.copy(target);
-  camera.position.copy(target).add(top ? new THREE.Vector3(.0001, -.0001, scale * 2.25) : new THREE.Vector3(scale * 1.0, -scale * 1.2, scale * 1.0));
-  camera.lookAt(target); controls.update();
-}
-
-function showPart(next) {
-  part = next;
-  $('tab-copper').classList.toggle('active', part === 'copper'); $('tab-preform').classList.toggle('active', part === 'preform');
-  if (!result) return;
-  clearModel();
-  const model = result.parts[part], [low, high] = model.bounds;
-  const sizes = high.map((n, i) => n - low[i]); scale = Math.max(sizes[0], sizes[1]);
-  target.set(...high.map((n, i) => (n + low[i]) / 2));
-  $('model-size').textContent = sizes.map(v => v.toFixed(3)).join(' × ') + ' mm';
-  if (renderer) {
-    group = new THREE.Group();
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(model.mesh.vertices, 3));
-    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(model.mesh.normals, 3));
-    geometry.setIndex(model.mesh.triangles);
-    const material = new THREE.MeshStandardMaterial({ color: part === 'copper' ? 0xbb7d4b : 0x9ca8aa, metalness: part === 'copper' ? .5 : .45, roughness: .4 });
-    group.add(new THREE.Mesh(geometry, material));
-    const edgeGeometry = new THREE.BufferGeometry(); edgeGeometry.setAttribute('position', new THREE.Float32BufferAttribute(model.edges.lines, 3));
-    group.add(new THREE.LineSegments(edgeGeometry, new THREE.LineBasicMaterial({ color: part === 'copper' ? 0x835831 : 0x647876, transparent: true, opacity: .45 })));
-    scene.add(group); setView();
-  } else {
-    const r = result.results, c = r.design.copper;
-    const points = part === 'preform' ? `${-r.boss_length / 2},${-r.boss_width / 2} ${r.boss_length / 2},${-r.boss_width / 2} ${r.boss_length / 2},${r.boss_width / 2} ${-r.boss_length / 2},${r.boss_width / 2}` : `${-c.base_length / 2},${-c.base_width / 2} ${c.base_length / 2},${-c.base_width / 2} ${c.base_length / 2},${c.base_width / 2} ${-c.base_length / 2},${c.base_width / 2}`;
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', `${-scale} ${-scale / 2} ${scale * 2} ${scale}`); svg.style.cssText = 'width:100%;height:100%';
-    const polygon = document.createElementNS(svg.namespaceURI, 'polygon'); polygon.setAttribute('points', points); polygon.setAttribute('fill', '#bc8754'); svg.append(polygon); $('viewer').prepend(svg);
-  }
-  $('viewer-placeholder').hidden = true;
-}
-$('tab-copper').addEventListener('click', () => showPart('copper'));
-$('tab-preform').addEventListener('click', () => showPart('preform'));
-$('view-top').addEventListener('click', () => setView(true)); $('view-iso').addEventListener('click', () => setView());
-
+$('download-layout').addEventListener('click',()=>{
+  clearTimeout(previewTimer);const current=refreshPreview(true);if(current)save(layoutDxf(current.results,current.layout),`${current.results.design.name}_layout_solder_mask.dxf`);
+});
 function save(data, name) {
   const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
@@ -192,6 +160,7 @@ $('download-zip').addEventListener('click', async () => {
   const snapshot = result; $('download-zip').disabled = true;
   try {
     const r = snapshot.results, files = {};
+    files['layout_solder_mask.dxf'] = strToU8(layoutDxf(r, snapshot.layout));
     for (const [name, model] of Object.entries(snapshot.parts)) {
       files[`${name}.step`] = new Uint8Array(await model.step.arrayBuffer());
       files[`${name}.stl`] = new Uint8Array(await model.stl.arrayBuffer());
@@ -201,6 +170,8 @@ $('download-zip').addEventListener('click', async () => {
       parameters: r.design, results: r, verification: snapshot.verification,
       cad_volumes_mm3: Object.fromEntries(Object.entries(snapshot.parts).map(([key, v]) => [key, v.volume])),
       native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
+    report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange thickness is schematic; SPH fixes the lead reference plane.' };
+    report.layout = layoutReport(snapshot.layout, r);
     files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));
     for (const path of ['creo_runner.py', 'WINDOWS_CREO7.md', 'THIRD_PARTY_LICENSES.txt']) {
@@ -216,5 +187,5 @@ $('download-zip').addEventListener('click', async () => {
   finally { $('download-zip').disabled = !result; }
 });
 
-renderMetrics(calculate(defaults));
-$('design-form').requestSubmit();
+
+refreshPreview();viewer.setView('iso');$('design-form').requestSubmit();

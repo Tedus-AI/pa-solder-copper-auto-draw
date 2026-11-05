@@ -1,7 +1,7 @@
 """Nominal design rules transcribed from pages 3–13 of the supplied specification."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, field
 from decimal import Decimal, ROUND_CEILING
 import math
 from pathlib import Path
@@ -55,6 +55,15 @@ class Preform:
 
 
 @dataclass(frozen=True)
+class Layout:
+    """Browser Layout metadata; never contributes to copper/preform solids."""
+    border_width: float = 1.0
+    epad_size: float = 1.5
+    web_width: float = 0.3
+    hole_clearance: float = 4.0
+
+
+@dataclass(frozen=True)
 class Design:
     name: str
     package: Package
@@ -62,6 +71,7 @@ class Design:
     copper: Copper
     stack: Stack
     preform: Preform
+    layout: Layout = field(default_factory=Layout)
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -76,7 +86,7 @@ class Design:
             raise ValueError("name 須為英文字母開頭、最多 40 個英數字或 _ -")
         groups = {}
         for name, typ in (("package", Package), ("pcb", PCB), ("copper", Copper),
-                          ("stack", Stack), ("preform", Preform)):
+                          ("stack", Stack), ("preform", Preform), ("layout", Layout)):
             source = data.get(name, {})
             if not isinstance(source, dict):
                 raise ValueError(f"{name} 必須是 mapping")

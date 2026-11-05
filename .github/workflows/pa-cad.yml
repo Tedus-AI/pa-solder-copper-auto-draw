@@ -2,7 +2,7 @@ name: PA CAD validation
 
 on:
   push:
-    branches: [deploy/pa-copper-preform-cad]
+    branches: [main, deploy/pa-copper-preform-cad]
     paths: ['cad-app/**', '.github/workflows/pa-cad.yml']
   workflow_dispatch:
 
