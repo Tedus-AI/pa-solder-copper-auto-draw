@@ -32,14 +32,63 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.screenshot({path:path.join(output,'initial-desktop.png'),fullPage:true});
     const panelFit=await page.locator('#fields').evaluate(e=>({scroll:e.scrollHeight,visible:e.clientHeight,groups:[...e.children].map(g=>({group:g.dataset.group,height:g.getBoundingClientRect().height}))}));
     assert.ok(panelFit.scroll<=panelFit.visible+5,`All desktop controls should fit without scrolling: ${JSON.stringify(panelFit)}`);
+    const annotationOutput=path.join(output,'dimensions');fs.mkdirSync(annotationOutput,{recursive:true});
+    const inputNames=await page.locator('#fields input[type=number]').evaluateAll(inputs=>inputs.map(input=>input.name));
+    assert.equal(inputNames.length,28);
+    const allViews=['top','bottom','front','back','left','right','iso'];
+    const checkAnnotation=async(key,requireLabel=true)=>{
+      await page.waitForFunction(key=>document.getElementById('viewer').dataset.dimension===key&&!!document.getElementById('viewer').dataset.annotationLayout,key);
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const state=await page.locator('#viewer').evaluate(el=>{
+        const data=JSON.parse(el.dataset.annotationLayout),origin=el.getBoundingClientRect(),label=el.querySelector('.dimension-value')?.getBoundingClientRect(),dock=document.getElementById('dimension-label').getBoundingClientRect();
+        return{...data,projection:el.dataset.projection,width:el.clientWidth,height:el.clientHeight,labelRect:label?{left:label.left-origin.left,right:label.right-origin.left,top:label.top-origin.top,bottom:label.bottom-origin.top}:null,dockOutside:dock.bottom<=origin.top+1};
+      });
+      assert.equal(state.projection,'orthographic');assert.ok(state.dockOutside,'Dimension dock must stay outside the canvas');
+      if(requireLabel)assert.ok(state.labelRect,`Missing external dimension label: ${key} ${JSON.stringify(state)}`);
+      if(state.labelRect){
+        const a=state.labelRect,b=state.bounds;
+        assert.equal(a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top,false,`Text covers model: ${key} ${JSON.stringify(state)}`);
+        assert.ok(a.left>=0&&a.right<=state.width&&a.top>=0&&a.bottom<=state.height,`Text clipped: ${key}`);
+      }
+      return state;
+    };
+    // Demonstrate every field, then check its label against the actual projected
+    // scene bounds in all six faces and the isometric view.
+    for(const key of inputNames){
+      await page.locator(`input[name="${key}"]`).focus();await checkAnnotation(key);
+      await page.locator('.viewer-panel').screenshot({path:path.join(annotationOutput,`${key.replace('.','-')}.png`)});
+      for(const view of allViews){await page.locator(`#view-${view}`).click();await checkAnnotation(key);}
+    }
+    for(const name of ['copper','preform','pcb'])await page.locator(`#ref-${name}`).uncheck();
+    await page.locator('#package-support_height').focus();
+    const sph=await checkAnnotation('package.support_height');
+    assert.equal(await page.locator('#viewer').getAttribute('data-camera-view'),'right');
+    assert.ok(Math.abs(sph.a[1]-sph.b[1])>25,'SPH must have a readable true-height side projection');
+    assert.ok(Math.abs(sph.worldB[2]-sph.worldA[2]-1.57)<1e-8);
+    await page.locator('.viewer-panel').screenshot({path:path.join(output,'sph-side.png')});
+    const viewport=await page.locator('#viewer').boundingBox();
+    await page.mouse.move(viewport.x+viewport.width/2,viewport.y+viewport.height/2);
+    await page.mouse.down();await page.mouse.move(viewport.x+viewport.width/2+80,viewport.y+viewport.height/2+35,{steps:8});await page.mouse.up();
+    await checkAnnotation('package.support_height',false);
+    await page.mouse.wheel(0,-1800);
+    await page.waitForFunction(()=>JSON.parse(document.getElementById('viewer').dataset.annotationLayout).side==='dock');
+    await checkAnnotation('package.support_height',false);
+    assert.equal(await page.locator('#dimension-label').isVisible(),true,'At extreme zoom the external dock retains the value');
+    await page.locator('#dimension-fit').click();await checkAnnotation('package.support_height');
+    assert.equal(await page.locator('#viewer').getAttribute('data-camera-view'),'right');
+    for(const name of ['copper','preform','pcb'])await page.locator(`#ref-${name}`).check();
     await page.locator('#copper-base_thickness').focus();
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'copper.base_thickness');
     assert.equal(await page.locator('#viewer').getAttribute('data-pulse'),'breathing');
     assert.match(await page.locator('#dimension-title').textContent(),/G.*3 mm/);
     const frame1=await page.locator('#viewer').screenshot();
+    const fixedText1=await page.locator('.dimension-value').screenshot();
     await new Promise(r=>setTimeout(r,250));
     const frame2=await page.locator('#viewer').screenshot();
     assert.notDeepEqual(frame1,frame2,'The real viewer highlight must animate');
+    assert.deepEqual(await page.locator('.dimension-value').screenshot(),fixedText1,'Dimension text must not fade or pulse');
+    const textStyle=await page.locator('.dimension-number').evaluate(el=>({fill:getComputedStyle(el).fill,opacity:getComputedStyle(el).opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}));
+    assert.deepEqual(textStyle,{fill:'rgb(96, 41, 15)',opacity:'1',parentOpacity:'1'});
     await page.locator('#pcb-opening_length').focus();
     assert.equal(await page.locator('#viewer').getAttribute('data-view-mode'),'assembly');
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'pcb.opening_length');
@@ -140,10 +189,22 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#viewer').scrollIntoViewIfNeeded();
+    for(const key of inputNames){await page.locator(`input[name="${key}"]`).focus();await checkAnnotation(key);}
+    await page.locator('#package-support_height').focus();await checkAnnotation('package.support_height');
+    await page.locator('#viewer').scrollIntoViewIfNeeded();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
+    // Review sheets accompany the 28 full-size screenshots in the CI artifact.
+    const review=await browser.newPage({viewport:{width:1480,height:900},deviceScaleFactor:1});
+    for(let i=0;i<inputNames.length;i+=7){
+      const tiles=inputNames.slice(i,i+7).map(key=>`<article><h2>${key}</h2><img src="data:image/png;base64,${fs.readFileSync(path.join(annotationOutput,`${key.replace('.','-')}.png`)).toString('base64')}"></article>`).join('');
+      await review.setContent(`<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#eaf0e8;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:max-content;gap:8px;font-family:system-ui}article{background:white;border:1px solid #cdd9c5;border-radius:5px;align-self:start}h2{font-size:13px;padding:5px 10px;margin:0;color:#253e2c}img{display:block;width:100%;height:auto}</style>${tiles}`);
+      await review.evaluate(async()=>{await Promise.all([...document.images].map(img=>img.decode()));await new Promise(resolve=>requestAnimationFrame(resolve));});
+      await review.screenshot({path:path.join(output,`dimensions-review-${i/7+1}.png`),fullPage:true});
+    }
+    await review.close();
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${url} — compact desktop, four visibility controls, six face views, PA reference, automatic/manual PCB rules, linked manufacturing exports, animated dimensions, Layout DXF, STEP roundtrip and mobile layout.`);
+    console.log(`PASS: ${url} — all 28 dimensions outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
   } catch (e) { console.error(e); process.exitCode = 1; }
   finally { if (browser) await browser.close(); if (server) server.kill('SIGTERM'); }
 })();

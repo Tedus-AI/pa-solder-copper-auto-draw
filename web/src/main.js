@@ -119,6 +119,7 @@ for(const component of ['copper','preform','pcb','pa'])$(`ref-${component}`).add
 $('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
 for(const view of ['iso',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
+$('dimension-fit').addEventListener('click',()=>{if(viewer.key)viewer.selectDimension(viewer.key);});
 $('help-open').addEventListener('click',()=>$('help-dialog').showModal());
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
