@@ -1,0 +1,7 @@
+node_modules/
+dist/
+test-results/
+public/creo_runner.py
+public/WINDOWS_CREO7.md
+public/example.yaml
+public/THIRD_PARTY_LICENSES.txt

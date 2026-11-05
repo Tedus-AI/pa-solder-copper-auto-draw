@@ -1,3 +1,0 @@
-# Streamlit Community Cloud runs dependency installation from the repository root.
--r cad-app/requirements.lock
--e ./cad-app[ui]

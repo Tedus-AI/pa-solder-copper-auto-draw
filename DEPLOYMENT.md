@@ -1,41 +1,27 @@
-# PA Copper / Preform CAD deployment
+# GitHub Pages deployment
 
-The full application is in `cad-app/`. The native Creo target is Creo Parametric 7.0.10.0 / Windows 11. Native PRT production still requires the local runner and real parametric master models; no native PRT output has been validated yet.
+The website is plain HTML, CSS and JavaScript in `web/`. CAD modelling runs in an OpenCascade WebAssembly worker in the browser; there is no Python server or Streamlit frontend.
 
-## Published source
+The GitHub Pages project URL is https://tedus-ai.github.io/pa-solder-copper-auto-draw/ . Deployment and live-browser verification are performed by `.github/workflows/pages.yml` after pushes to `main`.
 
-Repository: `Tedus-AI/pa-solder-copper-auto-draw`
+## GitHub configuration
 
-Branch: `deploy/pa-copper-preform-cad`
+In repository Settings → Pages, set Source to **GitHub Actions** (already configured by the user). The workflow builds the static assets, tests the browser tool, uploads `web/dist` and publishes it with the official GitHub Pages deployment action. A final job opens the actual deployed URL and tests 3D generation, STEP roundtrips, downloads, parameter changes, input rejection and mobile layout.
 
-Application entry point: `cad-app/app.py`
-
-GitHub hosts this source and its CI workflow. GitHub Pages cannot execute the Python / CadQuery / Streamlit server, so the repository URL is not an interactive application URL.
-
-## Streamlit Community Cloud configuration
-
-Open the [prefilled Streamlit deployment page](https://share.streamlit.io/deploy?repository=Tedus-AI%2Fpa-solder-copper-auto-draw&branch=deploy%2Fpa-copper-preform-cad&mainModule=cad-app%2Fapp.py), sign in with the authorized GitHub account, choose Python 3.12 in advanced settings, and deploy. This is a deployment setup link, not a running app URL. The query format matches Streamlit's own Deploy menu.
-
-After signing in to Streamlit Community Cloud with the authorized GitHub account, create an app with:
-
-| Setting | Value |
-|---|---|
-| Repository | `Tedus-AI/pa-solder-copper-auto-draw` |
-| Branch | `deploy/pa-copper-preform-cad` |
-| Main file | `cad-app/app.py` |
-| Python | `3.12` |
-| Secrets | None required for geometry generation |
-
-The root `requirements.txt` installs the verified dependency versions and the editable UI package from `cad-app`. `packages.txt` provides the OpenGL / font libraries needed by the CAD runtime. The app slug and actual URL are assigned by the hosting platform; no hosted app URL has been created or verified from this workspace.
-
-## Local development
+## Development
 
 ```bash
-cd cad-app
-bash scripts/install.sh
-source scripts/env.sh
-python -m pytest -q
-streamlit run app.py --server.headless true --browser.gatherUsageStats false
+cd web
+npm ci
+npm test
+npm run build
+npm run dev
 ```
 
-The development tests passed in the managed Linux environment. The GitHub Actions workflow runs the test suite and example export. These checks do not replace platform startup validation or native Creo acceptance on Windows.
+`npm run test:browser` uses Playwright. Set `CHROMIUM_PATH` to a local Chromium executable, or run `npx playwright install --with-deps chromium`. GitHub Actions installs a managed Chromium automatically.
+
+All production assets, including the CAD WebAssembly binary, are served from this repository's Pages site. The build copies the native Creo runner and guide from `cad-app/src/pa_cad/` into the static download assets; keep that single source up to date.
+
+The browser can export copper/preform STEP, STL, DXF, parameters, calculation reports and a native Creo job. PRT itself still requires real native parametric masters and licensed Creo Parametric 7.0.10.0 / Windows 11 execution. No native PRT has been generated or validated by the website.
+
+`cad-app/` contains the optional earlier Python CLI and local UI; it is not used to serve the public website.

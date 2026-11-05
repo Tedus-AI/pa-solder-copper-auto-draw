@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="基地台 final PA 銅塊與錫片自動出圖工具：3D STEP、2D DXF、體積扣除錫厚計算與 Creo 原生參數化任務。">
+  <meta name="theme-color" content="#173b38">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23173f39'/%3E%3Ctext x='6' y='28' fill='%23e3b88e' font-size='23'%3ECu%3C/text%3E%3C/svg%3E">
+  <title>PA Copper CAD｜銅塊與錫片自動出圖</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="PA Copper CAD 首頁"><span class="brand-mark">Cu<span>29</span></span><span>PA Copper <strong>CAD</strong><small>FINAL PA · 雙迴焊設計工具</small></span></a>
+    <div class="top-links"><span class="local-badge"><i></i>瀏覽器本機建模</span><a href="https://github.com/Tedus-AI/pa-solder-copper-auto-draw/tree/deploy/pa-copper-preform-cad/web" target="_blank" rel="noopener">GitHub ↗</a></div>
+  </header>
+  <main>
+    <section class="intro"><div><span class="eyebrow">FROM PARAMETERS TO PARTS</span><h1>銅塊與錫片，自動出圖。</h1><p>輸入封裝與板件尺寸，完成凸台建模、錫厚計算與工程圖匯出。</p></div><div class="workflow"><span>01 設定尺寸</span><b>→</b><span>02 建立實體</span><b>→</b><span>03 匯出圖檔</span></div></section>
+    <div class="workspace">
+      <aside class="panel controls"><div class="panel-heading"><h2>設計參數</h2><span>mm</span></div>
+        <div class="config-tools"><button id="reset" type="button">載入範例</button><button id="import" type="button">匯入 YAML / JSON</button><input id="import-file" type="file" accept=".yaml,.yml,.json" hidden></div>
+        <form id="design-form"><label class="name-field">設計名稱<input name="name" id="name" value="pa_780_m1p" required maxlength="40" pattern="[A-Za-z][A-Za-z0-9_\-]{0,39}"></label><div id="fields"></div><div class="form-footer"><button id="generate" class="primary" type="submit"><span>建立模型並計算</span><span>↗</span></button><p>資料與幾何運算皆在你的瀏覽器內完成。</p></div></form>
+      </aside>
+      <section class="results-column">
+        <div class="metrics" aria-live="polite"><article><span>銅塊凸台總高 CuH</span><strong id="metric-cuh">—</strong><small>mm</small></article><article class="featured"><span>錫片計算厚度 Z</span><strong id="metric-z">—</strong><small>mm</small></article><article><span>模型錫片厚度</span><strong id="metric-model">—</strong><small>mm</small></article><article><span>所需錫料體積</span><strong id="metric-volume">—</strong><small>mm³</small></article></div>
+        <section class="panel viewer-panel"><div class="viewer-toolbar"><div class="part-tabs" role="group" aria-label="模型選擇"><button id="tab-copper" type="button" class="active">銅塊</button><button id="tab-preform" type="button">錫片</button></div><div class="view-tools"><button id="view-iso" type="button">等角</button><button id="view-top" type="button">俯視</button><span>mm · 1:1</span></div></div><div id="viewer"><div id="viewer-placeholder">載入 CAD 引擎，準備建立實體…</div><span class="viewer-hint">拖曳旋轉 · 滾輪縮放 · 右鍵平移</span><div class="axis-key"><b>X</b><b>Y</b><b>Z</b></div></div><div class="viewer-status"><span id="status" role="status" aria-live="polite">準備中</span><span id="model-size"></span></div></section>
+        <div id="error" role="alert" hidden></div>
+        <section class="panel export-panel"><div><h2>出圖與下載</h2><p>銅塊、錫片與計算報告，一次打包。</p></div><div class="export-actions"><button id="download-dxf" class="secondary" disabled>目前零件 DXF</button><button id="download-step" class="secondary" disabled>目前零件 STEP</button><button id="download-zip" class="primary" disabled>下載完整出圖包 ↓</button></div></section>
+        <div class="lower-grid"><section class="panel calculation"><div class="panel-heading"><h2>錫量計算</h2><span>體積扣除法</span></div><div class="formula"><span>填錫空間 V₁₋₁</span><strong id="v-cavity">—</strong><i>−</i><span>銅凸台 V₂</span><strong id="v-boss">—</strong><i>÷</i><span>錫片面積 A₁</span><strong id="v-area">—</strong></div><div class="trial-row"><span>三款試作厚度</span><strong id="trials">—</strong></div></section><section class="panel native-info"><span class="native-badge">CREO 7 · WINDOWS 11</span><h2>原生 PRT，保留特徵樹。</h2><p>出圖包包含原生參數化任務與本機執行工具。PRT 須在已授權的 Creo 與原生母檔上產生，完成本機驗證後交付。</p><a href="./WINDOWS_CREO7.md" target="_blank" id="creo-guide">查看原生母檔與執行規格 ↗</a></section></div>
+        <details class="panel engineering"><summary>設計依據與待確認項目 <span>工程註記</span></summary><ul id="warnings"></ul><p>依《PA銅塊焊接雙迴焊製程設計規範_20260319》；基座 40 × 30 mm 為示範值，需以實際 thermal／RF 結果替換。STEP 為3D實體，DXF 為1:1名義尺寸圖。</p></details>
+      </section>
+    </div>
+  </main>
+  <footer><span>PA Copper CAD <b>／</b> mm · mm² · mm³</span><span>靜態 HTML / JavaScript · GitHub Pages <b>／</b> <a href="./THIRD_PARTY_LICENSES.txt">開源元件</a></span></footer>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

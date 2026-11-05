@@ -1,5 +1,15 @@
 # pa-solder-copper-auto-draw
 
+## 線上 HTML 出圖工具
+
+**[開啟 PA Copper CAD](https://tedus-ai.github.io/pa-solder-copper-auto-draw/)**
+
+以一般 HTML／CSS／JavaScript 建立，透過 GitHub Actions 部署至 GitHub Pages。瀏覽器直接執行 OpenCascade WebAssembly，提供銅塊與錫片 3D 預覽、STEP／STL／DXF、體積扣除錫厚計算與完整圖檔包，不需要 Python 網站主機或 Streamlit。
+
+原生參數化 PRT 須在 Creo Parametric 7.0.10.0／Windows 11 使用下載包內的 runner 與真實原生母檔產生，實機驗證尚未完成。網頁不將 STEP 匯入另存視為原生特徵樹。
+
+網頁原始碼在 `web/`，部署與測試方式見 [DEPLOYMENT.md](DEPLOYMENT.md)。以下保留原始 Python CLI 使用說明。
+
 5G RRU PA（功率放大器）焊料 / Copper Coin 自動出圖工具。
 
 輸入 PA 封裝與設計參數（YAML），自動計算並輸出：
