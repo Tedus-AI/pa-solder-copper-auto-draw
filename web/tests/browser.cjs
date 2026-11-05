@@ -8,7 +8,7 @@ const { unzipSync, strFromU8 } = require('fflate');
 
 (async () => {
   const output = process.env.TEST_OUTPUT || '/tmp/pa-cad-web-test'; fs.mkdirSync(output, { recursive: true });
-  let server, browser;
+  let server, browser, page;
   const url = process.env.BASE_URL || 'http://127.0.0.1:4173/pa-solder-copper-auto-draw/';
   try {
     if (!process.env.BASE_URL) server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'], { stdio: 'pipe' });
@@ -17,7 +17,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.ok(available, `Website did not become available: ${url}`);
     const executable = process.env.CHROMIUM_PATH || (process.env.CI ? undefined : ['/usr/bin/chromium', '/usr/bin/google-chrome'].find(p => fs.existsSync(p)));
     browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-    const page = await browser.newPage({ viewport: { width: 1920, height: 900 }, locale: 'zh-TW', acceptDownloads: true, reducedMotion: 'no-preference' });
+    page = await browser.newPage({ viewport: { width: 1920, height: 900 }, locale: 'zh-TW', acceptDownloads: true, reducedMotion: 'no-preference' });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') console.error('Browser console:', m.text()); });
     await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
@@ -214,6 +214,16 @@ const { unzipSync, strFromU8 } = require('fflate');
     await review.close();
     assert.deepEqual(errors, []);
     console.log(`PASS: ${url} — all 28 dimensions outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
-  } catch (e) { console.error(e); process.exitCode = 1; }
+  } catch (e) {
+    console.error(e);process.exitCode=1;
+    let diagnostic='';
+    try{
+      if(page){
+        diagnostic=JSON.stringify(await page.evaluate(()=>({key:document.getElementById('viewer')?.dataset.dimension,view:document.getElementById('viewer')?.dataset.cameraView,annotation:document.getElementById('viewer')?.dataset.annotationLayout,notation:document.querySelector('.dimension-number')?.textContent})));
+        fs.writeFileSync(path.join(output,'failure.json'),diagnostic);await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});
+      }
+    }catch{}
+    if(process.env.CI){const message=(String(e.stack||e)+'\n'+diagnostic).slice(0,12000).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');console.log(`::error title=Browser regression::${message}`);}
+  }
   finally { if (browser) await browser.close(); if (server) server.kill('SIGTERM'); }
 })();
