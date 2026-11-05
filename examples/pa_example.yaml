@@ -1,0 +1,22 @@
+# 範例：5G RRU 末級 PA（尺寸為示意值，請替換成實際 datasheet）
+package:
+  name: PA_example
+  body_w: 10.0
+  body_h: 6.0
+  pad_w: 8.0        # exposed pad / flange
+  pad_h: 4.0
+  pad_offset_x: 0.0
+  pad_offset_y: 0.0
+
+solder:
+  inset: 0.1        # 焊料相對 pad 單邊內縮
+  windows_x: 3      # 鋼板開窗分割（降低 void）
+  windows_y: 2
+  web: 0.3
+  thickness: 0.1
+
+coin:
+  expand: 0.5       # copper coin 相對 pad 單邊外擴
+  corner_r: 0.3
+  thickness: 1.6
+  pcb_clearance: 0.1

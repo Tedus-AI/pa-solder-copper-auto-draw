@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pa-draw"
+version = "0.1.0"
+description = "5G RRU PA solder / copper coin auto drawing tool"
+requires-python = ">=3.10"
+dependencies = ["ezdxf>=1.1", "matplotlib>=3.7", "pyyaml>=6.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+pa-draw = "pa_draw.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
