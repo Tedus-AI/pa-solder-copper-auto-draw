@@ -14,6 +14,8 @@ GitHub hosts this source and its CI workflow. GitHub Pages cannot execute the Py
 
 ## Streamlit Community Cloud configuration
 
+Open the [prefilled Streamlit deployment page](https://share.streamlit.io/deploy?repository=Tedus-AI%2Fpa-solder-copper-auto-draw&branch=deploy%2Fpa-copper-preform-cad&mainModule=cad-app%2Fapp.py), sign in with the authorized GitHub account, choose Python 3.12 in advanced settings, and deploy. This is a deployment setup link, not a running app URL. The query format matches Streamlit's own Deploy menu.
+
 After signing in to Streamlit Community Cloud with the authorized GitHub account, create an app with:
 
 | Setting | Value |
