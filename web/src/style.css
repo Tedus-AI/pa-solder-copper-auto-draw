@@ -40,3 +40,8 @@
 @keyframes dimension-breathe{0%,100%{opacity:.4}50%{opacity:1}}
 @media(max-width:600px){#dimension-title{font-size:11px}#dimension-context{font-size:10px}#dimension-label{padding:7px 9px}.viewer-panel:has(#dimension-label:not([hidden])){height:540px}}
 @media(prefers-reduced-motion:reduce){.dimension-halo{animation:none;opacity:1}}
+
+/* Engineering notation: unboxed values, fine extension lines and filled arrows. */
+.dimension-extension,.dimension-center{fill:none;stroke:#a64219;stroke-width:1;opacity:1}
+.dimension-value rect{fill:none;stroke:none}
+.dimension-number{font-variant-numeric:tabular-nums}

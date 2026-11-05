@@ -3,6 +3,7 @@ import { zipSync, strToU8 } from 'fflate';
 import { parse, stringify } from 'yaml';
 import { defaults, fields, calculate, nativeJob, openingRecommendation } from './design.js';
 import { faceViews } from './camera-views.js';
+import { formatDimension } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { CADViewer } from './viewer.js';
@@ -36,7 +37,7 @@ for(const group of ['package','stack','pcb','copper','preform','layout']){
   const summary=document.createElement('summary');summary.textContent=title;details.append(summary);
   const grid=document.createElement('div');grid.className='field-grid';
   for(const[key,title]of Object.entries(names)){
-    const label=document.createElement('label');const caption=document.createElement('span');caption.textContent=title;label.append(caption);
+    const label=document.createElement('label');const caption=document.createElement('span');caption.textContent=title.replace(/ ±$/,'')+' =';label.append(caption);
     const input=document.createElement('input');input.type='number';input.name=`${group}.${key}`;input.id=`${group}-${key}`;
     input.step='any';input.min='0';input.max='10000';input.inputMode='decimal';input.required=key!=='thickness_override';input.value=defaults[group][key]??'';
     input.setAttribute('aria-label',`${title} mm`);label.append(input);grid.append(label);
@@ -72,7 +73,7 @@ function syncLinkedFields(d){
     input.title=auto?'依 PA 尺寸、公差及開窗規則自動計算；取消「自動連動 M/N」可手動修改。':'手動開窗尺寸';
     if(auto){input.value=chain.rounded[i];d.pcb[key]=chain.rounded[i];}
   }
-  $('opening-chain').textContent=`${auto?'自動':'建議'} M/N：最大 PA＋貼片精度＋PCB 公差${chain.factor===.5?' / 2':''} → 向上取 0.1 mm`;
+  $('opening-chain').textContent=`${auto?'自動':'建議'} M/N = 最大 PA＋貼片精度＋PCB 公差${chain.factor===.5?' / 2':''} → 向上取 0.1 mm`;
   return d;
 }
 function status(text){$('status').textContent=text;}
@@ -87,7 +88,7 @@ function refreshPreview(showError=false){
     const r=calculate(syncLinkedFields(formValues())),layout=layoutFor(r);draft={results:r,layout};
     viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
     $('download-layout').disabled=false;$('viewer').dataset.previewValid='true';
-    $('model-size').textContent=`E ${r.design.copper.base_length} × F ${r.design.copper.base_width} · G ${r.design.copper.base_thickness} mm`;
+    $('model-size').textContent=[['E',r.design.copper.base_length],['F',r.design.copper.base_width],['G',r.design.copper.base_thickness]].map(([name,value])=>formatDimension(name,value)).join(' · ');
     return draft;
   }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';$('download-layout').disabled=true;$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
 }
@@ -127,12 +128,11 @@ function renderMetrics(r){
   for(const[id,v,digits]of [['metric-cuh',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
   $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ')+' mm';
   $('warnings').replaceChildren(...r.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
-  $('layout-summary').textContent=`R ${r.design.layout.border_width} / S ${r.design.layout.epad_size} / T ${r.design.layout.web_width} / ØV ${r.design.layout.hole_clearance} mm`;
-  const pair=values=>values.map(v=>Number(v.toFixed(3))).join(' × ');
-  $('package-derived').textContent=`最大 PA ${pair(r.opening_chain.maximum)} mm（標稱＋公差）`;
-  $('copper-derived').textContent=`凸台 I/H ${r.boss_length} × ${r.boss_width}；HSK 深度 ${r.heatsink_depth.toFixed(2)} mm`;
-  $('stack-derived').textContent=`CuH＝C＋A＋B−SPH−D＋K＝${r.boss_total_height.toFixed(4)} mm`;
-  $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} M/N：最大 PA＋貼片精度＋PCB 公差${r.opening_chain.factor===.5?' / 2':''}；${pair(r.opening_chain.raw)} → ${pair(r.recommended_opening)}（向上取 0.1 mm）`;
+  $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
+  $('package-derived').textContent=r.opening_chain.maximum.map((v,i)=>formatDimension(i?'PA(Wmax)':'PA(Lmax)',v)).join('；');
+  $('copper-derived').textContent=[['I',r.boss_length],['H',r.boss_width],['HSK 深度',r.heatsink_depth]].map(([name,value])=>formatDimension(name,value)).join('；');
+  $('stack-derived').textContent=`CuH(L) = C + A + B − SPH − D + K = ${r.boss_total_height.toFixed(4)} mm`;
+  $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} ${formatDimension('M',r.recommended_opening[0])}；${formatDimension('N',r.recommended_opening[1])}。${r.design.pcb.opening_rule==='delta'?'Delta':'Ampleon'}：最大 PA＋精度＋PCB 公差${r.opening_chain.factor===.5?' / 2':''}，向上取至 0.1 mm。`;
 }
 function layoutReport(g,r){return {rules:r.design.layout,grid_pitch:g.pitch,epad_cells:g.cells.length,epad_area_mm2:g.epad_area,mask_area_mm2:g.mask_area,edge_web_margins_mm:g.boundary_margins,chord_tolerance_mm:g.chord_tolerance,notes:g.notes};}
 function requestModel(design) {

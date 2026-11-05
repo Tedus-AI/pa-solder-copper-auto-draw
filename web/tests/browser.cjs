@@ -49,6 +49,11 @@ const { unzipSync, strFromU8 } = require('fflate');
         const a=state.labelRect,b=state.bounds;
         assert.equal(a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top,false,`Text covers model: ${key} ${JSON.stringify(state)}`);
         assert.ok(a.left>=0&&a.right<=state.width&&a.top>=0&&a.bottom<=state.height,`Text clipped: ${key}`);
+        const notation=await page.locator('.dimension-number').textContent();
+        assert.match(notation,/^.+ = (?:±|⌀)?[\d.]+ mm$/,`Incorrect notation: ${key}`);
+        assert.ok((await page.locator('#dimension-title').textContent()).includes(notation),'Dock and viewer must use identical notation');
+        const fits=await page.locator('.dimension-value').evaluate(group=>{const box=group.querySelector('rect').getBoundingClientRect(),text=group.querySelector('.dimension-number').getBoundingClientRect();return text.left>=box.left+5&&text.right<=box.right-5;});
+        assert.ok(fits,`Notation exceeds its allocated width: ${key}`);
       }
       return state;
     };
@@ -56,9 +61,13 @@ const { unzipSync, strFromU8 } = require('fflate');
     // scene bounds in all six faces and the isometric view.
     for(const key of inputNames){
       await page.locator(`input[name="${key}"]`).focus();await checkAnnotation(key);
+      const kind=JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind;
+      assert.equal(await page.locator('.dimension-arrow').count(),kind==='radius'?1:2,`Wrong arrow convention: ${key}`);
       await page.locator('.viewer-panel').screenshot({path:path.join(annotationOutput,`${key.replace('.','-')}.png`)});
       for(const view of allViews){await page.locator(`#view-${view}`).click();await checkAnnotation(key);}
     }
+    assert.ok((await page.locator('#model-size').textContent()).includes('E = 40 mm'));
+    assert.ok((await page.locator('#layout-summary').textContent()).includes('V = ⌀4 mm'));
     for(const name of ['copper','preform','pcb'])await page.locator(`#ref-${name}`).uncheck();
     await page.locator('#package-support_height').focus();
     const sph=await checkAnnotation('package.support_height');

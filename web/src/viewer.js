@@ -4,7 +4,7 @@ import { octagon } from './design.js';
 import { dimensionFor, dimensionLabel, referenceLevels } from './dimensions.js';
 import { paReference } from './pa-reference.js';
 import { cameraView, createCADCamera } from './camera-views.js';
-import { annotationLayout, overlaps } from './annotation-layout.js';
+import { annotationLayout, featureLeader, overlaps } from './annotation-layout.js';
 
 const vec = p => new THREE.Vector3(...p);
 const svgNS='http://www.w3.org/2000/svg';
@@ -30,6 +30,7 @@ export class CADViewer {
     this.scene=new THREE.Scene();this.camera=createCADCamera();this.camera.position.set(50,-60,50);
     this.target=new THREE.Vector3();this.models=new THREE.Group();this.scene.add(this.models);
     this.overlay=svgNode('svg',{'class':'dimension-overlay','aria-label':'尺寸定位標註'});container.append(this.overlay);
+    this.textMeasure=document.createElement('canvas').getContext('2d');this.textMeasure.font='650 13px system-ui, sans-serif';
     this.activeDimension=null;this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
     try {
       this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0,0);
@@ -189,7 +190,7 @@ export class CADViewer {
   }
   markView(view){this.el.dataset.cameraView=view;document.querySelectorAll('[data-camera-view]').forEach(el=>{if(el.tagName==='BUTTON')el.setAttribute('aria-pressed',String(el.dataset.cameraView===view));});}
   clearAnnotation(){this.overlay.replaceChildren();this.activeDimension=null;this.el.dataset.dimension='';delete this.el.dataset.annotationLayout;this.onDimension(null);}
-  labelWidth(){return this.activeDimension?.datums&&this.el.clientWidth>=600?150:Math.max(116,this.activeDimension?.label.length*8+20||116);}
+  labelWidth(){const measured=this.activeDimension?Math.ceil(this.textMeasure.measureText(this.activeDimension.label).width)+24:116;return Math.max(116,measured,this.activeDimension?.datums&&this.el.clientWidth>=600?150:0);}
   labelHeight(){return this.activeDimension?.datums&&this.el.clientWidth>=600?65:32;}
   project(point){const p=(point.isVector3?point.clone():vec(point)).project(this.camera);return[(p.x+1)*this.el.clientWidth/2,(1-p.y)*this.el.clientHeight/2];}
   updateAnnotation() {
@@ -205,12 +206,24 @@ export class CADViewer {
     const line=(points,attributes={})=>{const node=svgNode('polyline',{points:points.map(p=>p.join(',')).join(' '),class:'dimension-line',...attributes});this.overlay.append(node);return node;};
     const markers=svgNode('g',{class:'dimension-markers'});
     for(const [a,b]of d.referenceSegments||[])line([this.project(a),this.project(b)],{class:'dimension-datum-line'});
-    line([layout.a,layout.aa]);line([layout.b,layout.bb]);line([layout.aa,layout.bb]);
-    if(layout.leader.length)line(layout.leader,{class:'dimension-leader'});
-    const distance=Math.hypot(layout.bb[0]-layout.aa[0],layout.bb[1]-layout.aa[1]);
-    if(distance>2){
-      const u=[(layout.bb[0]-layout.aa[0])/distance,(layout.bb[1]-layout.aa[1])/distance],n=[-u[1],u[0]],outward=distance<22;
-      for(const [p,sign]of [[layout.aa,1],[layout.bb,-1]]){
+    const extension=(a,b)=>{const length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(length<1)return;const u=[(b[0]-a[0])/length,(b[1]-a[1])/length];line([[a[0]+u[0]*3,a[1]+u[1]*3],[b[0]+u[0]*4,b[1]+u[1]*4]],{class:'dimension-extension'});};
+    const isRadius=d.kind==='radius',isDiameter=d.kind==='diameter';
+    let arrowA=layout.aa,arrowB=layout.bb;
+    if(isRadius||isDiameter){
+      // Radius and diameter use the actual projected radial/diametral line,
+      // rather than a horizontal component of that line labelled as a radius.
+      arrowA=layout.a;arrowB=layout.b;line([arrowA,arrowB]);
+      const leader=featureLeader(layout.a,layout.b,bounds,layout.label,layout.side);if(leader.length)line(leader,{class:'dimension-leader'});
+      if(isRadius){const [x,y]=layout.a;line([[x-4,y],[x+4,y]],{class:'dimension-center'});line([[x,y-4],[x,y+4]],{class:'dimension-center'});}
+    }else{
+      extension(layout.a,layout.aa);extension(layout.b,layout.bb);line([layout.aa,layout.bb]);
+      if(layout.leader.length)line(layout.leader,{class:'dimension-leader'});
+    }
+    const distance=Math.hypot(arrowB[0]-arrowA[0],arrowB[1]-arrowA[1]);
+    if(distance>.05){
+      const u=[(arrowB[0]-arrowA[0])/distance,(arrowB[1]-arrowA[1])/distance],n=[-u[1],u[0]],outward=!isRadius&&distance<22;
+      if(outward)line([[arrowA[0]-u[0]*11,arrowA[1]-u[1]*11],[arrowB[0]+u[0]*11,arrowB[1]+u[1]*11]]);
+      for(const [p,sign]of isRadius?[[arrowB,-1]]:[[arrowA,1],[arrowB,-1]]){
         const dir=sign*(outward?-1:1),base=[p[0]+u[0]*dir*7,p[1]+u[1]*dir*7];
         this.overlay.append(svgNode('polygon',{points:[p,[base[0]+n[0]*2.8,base[1]+n[1]*2.8],[base[0]-n[0]*2.8,base[1]-n[1]*2.8]].map(v=>v.join(',')).join(' '),class:'dimension-arrow'}));
       }
@@ -226,7 +239,7 @@ export class CADViewer {
       if(d.datums&&width>=600)d.datums.forEach((value,i)=>{const text=svgNode('text',{x:cx,y:box.top+39+i*15,class:'dimension-datum-text'});text.textContent=value;group.append(text);});
       this.overlay.append(group);
     }
-    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:d.a,worldB:d.b});
+    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:d.a,worldB:d.b,kind:d.kind});
   }
   selectDimension(key,fit=true) {
     if(!this.r)return;

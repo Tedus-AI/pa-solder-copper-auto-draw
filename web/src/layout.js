@@ -87,7 +87,8 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   for(const [shapes,layer]of [[g.copper,'COPPER_BOUNDARY'],[g.outer,'MASK_BOUNDARY'],[g.cutout,'PCB_CUTOUT']])for(const polygon of shapes)polygon.forEach(ring=>poly(ring,layer));
   for(const[x,y]of g.centers)for(const[layer,d]of [['HOLE_CLEARANCE',r.design.layout.hole_clearance],['MOUNT_HOLE',r.design.copper.hole_diameter]])put(0,'CIRCLE',100,'AcDbEntity',8,layer,100,'AcDbCircle',10,x,20,y,30,0,40,d/2);
   const l=r.design.layout, notes=[`LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,`SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
-    `R=${l.border_width}; S=${l.epad_size} x ${l.epad_size}; T=${l.web_width}; pitch=${g.pitch}`,`U=PCB window ${r.design.pcb.opening_length} x ${r.design.pcb.opening_width}; V=DIA ${l.hole_clearance}`,
+    [['R',l.border_width],['S',l.epad_size],['T',l.web_width],['Pitch',g.pitch]].map(([name,value])=>formatDimension(name,value,{cad:true})).join('; '),
+    `U = PCB window: ${formatDimension('M',r.design.pcb.opening_length,{cad:true})}; ${formatDimension('N',r.design.pcb.opening_width,{cad:true})}; ${formatDimension('V',l.hole_clearance,{prefix:'⌀',cad:true})}`,
     `Origin=PCB opening center; E-PAD cells=${g.cells.length}; edge pads clipped`,
     'V excludes E-PADs; green annulus remains between actual hole D and V.',
     'Reference layers COPPER_BOUNDARY / PCB_CUTOUT / HOLE_CLEARANCE are not mask polygons.',
@@ -97,3 +98,4 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   notes.forEach((text,i)=>put(0,'TEXT',100,'AcDbEntity',8,'NOTES',100,'AcDbText',10,r.design.copper.base_length/2+l.border_width+4,20,18-i*1.7,30,0,40,.8,1,text,100,'AcDbText'));
   put(0,'ENDSEC',0,'EOF');return out.join('\n')+'\n';
 }
+import { formatDimension } from './dimension-format.js';

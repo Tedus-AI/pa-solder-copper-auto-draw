@@ -16,7 +16,7 @@ export function dimensionFor(key,r,layout) {
   const map={
     'package.length':()=>v([-p.length/2,-p.width/2,z.flange],[p.length/2,-p.width/2,z.flange],'assembly',p.length,'PA flange 長度',[0,-2,0]),
     'package.width':()=>v([p.length/2,-p.width/2,z.flange],[p.length/2,p.width/2,z.flange],'assembly',p.width,'PA flange 寬度',[2,0,0]),
-    'package.max_tolerance':()=>v([p.length/2-p.max_tolerance/2,0,z.flange],[p.length/2+p.max_tolerance/2,0,z.flange],'assembly',p.max_tolerance,`PA 尺寸公差 ±${p.max_tolerance}；虛線為最大外框 ${(p.length+p.max_tolerance).toFixed(3)} × ${(p.width+p.max_tolerance).toFixed(3)} mm`,[3,0,2]),
+    'package.max_tolerance':()=>v([p.length/2-p.max_tolerance/2,0,z.flange],[p.length/2+p.max_tolerance/2,0,z.flange],'assembly',p.max_tolerance,`PA 尺寸公差 = ±${p.max_tolerance} mm；虛線最大外框 = ${(p.length+p.max_tolerance).toFixed(3)} × ${(p.width+p.max_tolerance).toFixed(3)} mm`,[3,0,2]),
     'package.support_height':()=>v([pinX,p.width/2,z.flange],[pinX,p.width/2,z.lead],'assembly',p.support_height,'SPH：PA 金屬底座底面 → PIN 引腳底面',[4,0,0]),
     'pcb.opening_length':()=>v([-b.opening_length/2,0,z.pcbTop],[b.opening_length/2,0,z.pcbTop],'assembly',b.opening_length,'PCB 開孔長度 M',[0,-b.opening_width/2-2,0]),
     'pcb.opening_width':()=>v([0,-b.opening_width/2,z.pcbTop],[0,b.opening_width/2,z.pcbTop],'assembly',b.opening_width,'PCB 開孔寬度 N',[b.opening_length/2+3,0,0]),
@@ -45,6 +45,7 @@ export function dimensionFor(key,r,layout) {
   };
   const dimension=map[key]?.();
   if(!dimension)return null;
+  dimension.kind=dimensionSpecs[key]?.kind||'linear';
   dimension.view=key==='package.support_height'?'right':Math.abs(dimension.b[2]-dimension.a[2])>1e-8?'front':'top';
   if(key==='package.support_height'){
     dimension.datums=['下端：PA 底面','上端：PIN 底面'];
@@ -55,6 +56,5 @@ export function dimensionFor(key,r,layout) {
   }
   return dimension;
 }
-
-const symbols={'package.length':'PA L','package.width':'PA W','package.max_tolerance':'±Tol','package.support_height':'SPH','copper.base_length':'E','copper.base_width':'F','copper.base_thickness':'G','copper.corner_radius':'R','copper.hole_diameter':'ØD','copper.hole_edge_offset':'C','copper.pad_size':'J','stack.lead_solder':'A','stack.board_solder':'B','stack.flange_gap':'D','stack.pad_height':'K','pcb.opening_length':'M','pcb.opening_width':'N','pcb.relief_diameter':'ØO','pcb.thickness':'C','preform.chamfer':'Y','preform.thickness_override':'Z','preform.trial_delta':'±Δ','layout.border_width':'R','layout.epad_size':'S','layout.web_width':'T','layout.hole_clearance':'ØV'};
-export const dimensionLabel=dimension=>`${symbols[dimension.key]||'Δ'}  ${Number(dimension.value.toFixed(4))} mm`;
+import { dimensionSpecs } from './dimension-format.js';
+export { dimensionLabel } from './dimension-format.js';
