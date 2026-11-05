@@ -1,0 +1,36 @@
+"""Exact B-rep solids; never rename STEP output to pretend it is Creo PRT."""
+from __future__ import annotations
+
+import cadquery as cq
+
+from .design import Design, Result, octagon
+
+
+def copper_block(d: Design, r: Result) -> cq.Workplane:
+    c = d.copper
+    base = (cq.Workplane("XY").rect(c.base_length, c.base_width)
+            .extrude(c.base_thickness).edges("|Z").fillet(c.corner_radius))
+    hx, hy = c.base_length / 2 - c.hole_edge_offset, c.base_width / 2 - c.hole_edge_offset
+    holes = (cq.Workplane("XY").pushPoints([(-hx, -hy), (hx, hy)])
+             .circle(c.hole_diameter / 2).extrude(c.base_thickness))
+    base = base.cut(holes)
+    boss = (cq.Workplane("XY").workplane(offset=c.base_thickness)
+            .rect(r.boss_length, r.boss_width).extrude(r.boss_lower_height))
+    px, py = (r.boss_length - c.pad_size) / 2, (r.boss_width - c.pad_size) / 2
+    pads = (cq.Workplane("XY").workplane(offset=c.base_thickness + r.boss_lower_height)
+            .pushPoints([(x, y) for x in (-px, px) for y in (-py, py)])
+            .rect(c.pad_size, c.pad_size).extrude(d.stack.pad_height))
+    return base.union(boss).union(pads).clean()
+
+
+def solder_preform(d: Design, r: Result) -> cq.Workplane:
+    return (cq.Workplane("XY").polyline(octagon(r.boss_length, r.boss_width, d.preform.chamfer))
+            .close().extrude(r.model_thickness))
+
+
+def expected_copper_volume(d: Design, r: Result) -> float:
+    import math
+    c = d.copper
+    area = c.base_length * c.base_width - (4 - math.pi) * c.corner_radius**2
+    area -= 2 * math.pi * (c.hole_diameter / 2)**2
+    return area * c.base_thickness + r.boss_volume

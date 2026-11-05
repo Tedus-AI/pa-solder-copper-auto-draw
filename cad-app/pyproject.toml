@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pa-copper-preform-cad"
+version = "0.1.0"
+description = "Parametric final-PA copper block and solder preform CAD generator"
+requires-python = ">=3.11"
+dependencies = ["cadquery>=2.8,<3", "ezdxf>=1.4,<2", "PyYAML>=6,<7"]
+
+[project.optional-dependencies]
+ui = ["streamlit>=1.40,<2", "plotly>=6,<8"]
+dev = ["pytest>=8,<10"]
+
+[project.scripts]
+pa-cad = "pa_cad.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pa_cad = ["resources/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

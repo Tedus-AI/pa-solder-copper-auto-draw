@@ -1,0 +1,31 @@
+# All lengths in mm. 40 x 30 base is a demonstration, NOT specified in the PDF.
+name: pa_780_m1p
+package:
+  length: 20.57
+  width: 9.78
+  max_tolerance: 0.127
+  support_height: 1.57
+pcb:
+  opening_length: 20.9
+  opening_width: 10.1
+  thickness: 2.0
+  relief_diameter: 2.0
+  placement_accuracy: 0.066
+  opening_tolerance: 0.1
+copper:
+  base_length: 40.0
+  base_width: 30.0
+  base_thickness: 3.0
+  corner_radius: 3.0
+  hole_diameter: 3.0
+  hole_edge_offset: 4.0
+  pad_size: 1.5
+stack:
+  lead_solder: 0.1
+  board_solder: 0.1
+  flange_gap: 0.3
+  pad_height: 0.15
+preform:
+  chamfer: 3.4
+  trial_delta: 0.05
+  thickness_override: null
