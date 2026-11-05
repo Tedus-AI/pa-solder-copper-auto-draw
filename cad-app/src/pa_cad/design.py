@@ -1,7 +1,7 @@
 """Nominal design rules transcribed from pages 3–13 of the supplied specification."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields, field
+from dataclasses import asdict, dataclass, fields, field, replace
 from decimal import Decimal, ROUND_CEILING
 import math
 from pathlib import Path
@@ -26,6 +26,8 @@ class PCB:
     relief_diameter: float = 2.0
     placement_accuracy: float = 0.066
     opening_tolerance: float = 0.1
+    opening_mode: str = "manual"  # Legacy parameter files preserve their opening.
+    opening_rule: str = "delta"
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,11 @@ class Design:
                 raise ValueError(f"{name} 欄位不完整或不支援: {exc}") from exc
             for f in fields(group):
                 value = getattr(group, f.name)
+                if name == "pcb" and f.name in {"opening_mode", "opening_rule"}:
+                    choices = {"auto", "manual"} if f.name == "opening_mode" else {"delta", "ampleon"}
+                    if not isinstance(value, str) or value not in choices:
+                        raise ValueError(f"pcb.{f.name} 不支援此設定")
+                    continue
                 if name == "preform" and f.name == "thickness_override" and value is None:
                     continue
                 if (isinstance(value, bool) or not isinstance(value, (int, float))
@@ -107,6 +114,9 @@ class Design:
                     raise ValueError(f"{name}.{f.name} 超出有效範圍")
             groups[name] = group
         design = cls(data["name"], **groups)
+        if design.pcb.opening_mode == "auto":
+            length, width = recommended_opening(design)
+            design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
         calculate(design)  # Cross-field physical validation, also used by direct callers.
         return design
 
@@ -120,6 +130,14 @@ class Design:
 
 def ceil_tenth(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.1"), rounding=ROUND_CEILING))
+
+
+def recommended_opening(d: Design) -> tuple[float, float]:
+    factor = Decimal("0.5") if d.pcb.opening_rule == "ampleon" else Decimal("1")
+    return tuple(ceil_tenth(float(Decimal(str(v)) + Decimal(str(d.package.max_tolerance))
+                                 + Decimal(str(d.pcb.placement_accuracy))
+                                 + Decimal(str(d.pcb.opening_tolerance)) * factor))
+                 for v in (d.package.length, d.package.width))
 
 
 @dataclass(frozen=True)
@@ -144,6 +162,9 @@ class Result:
 
 def calculate(d: Design) -> Result:
     p, b, c, s, t = d.package, d.pcb, d.copper, d.stack, d.preform
+    recommended = recommended_opening(d)
+    if b.opening_mode == "auto":
+        b = replace(b, opening_length=recommended[0], opening_width=recommended[1])
     length, width = ceil_tenth(p.length), ceil_tenth(p.width)
     height = b.thickness + s.lead_solder + s.board_solder - p.support_height - s.flange_gap + s.pad_height
     gap = height + s.flange_gap - s.pad_height
@@ -179,10 +200,6 @@ def calculate(d: Design) -> Result:
     trials = (z - t.trial_delta, z, z + t.trial_delta)
     if trials[0] <= 0:
         raise ValueError("厚度試作差值過大，最薄試片厚度必須大於零")
-    recommended = tuple(ceil_tenth(float(Decimal(str(v)) + Decimal(str(p.max_tolerance))
-                                        + Decimal(str(b.placement_accuracy))
-                                        + Decimal(str(b.opening_tolerance))))
-                        for v in (p.length, p.width))
     warnings = [
         "銅塊外形 E/F 為使用者輸入，須由 thermal / RF 設計確認；範例 40×30 mm 並非 PDF 規定。",
         "PDF 第12頁為 Z±0.05 mm，第13頁表格為 ±0.15 mm；本次依輸入 trial_delta 計算。",
@@ -191,7 +208,7 @@ def calculate(d: Design) -> Result:
     clearance = (t.chamfer - 2 * c.pad_size) / math.sqrt(2)
     warnings.append(f"依四角 J×J 凸台與45度削角計算最近距離為 {clearance:.4f} mm；PDF 第11頁約0.37 mm，須確認。")
     if b.opening_length < recommended[0] or b.opening_width < recommended[1]:
-        warnings.append(f"PCB 開孔小於 Delta 規則向上進位的建議值 {recommended[0]}×{recommended[1]} mm。")
+        warnings.append(f"PCB 手動開孔小於 {b.opening_rule.title()} 規則向上進位的建議值 {recommended[0]}×{recommended[1]} mm。")
     if t.thickness_override is not None:
         warnings.append("模型採用指定的 thickness_override；計算厚度與三款試片仍另列於報告。")
     return Result(length, width, height, height - s.pad_height, gap, cavity, boss,

@@ -1,7 +1,8 @@
 import './style.css';
 import { zipSync, strToU8 } from 'fflate';
 import { parse, stringify } from 'yaml';
-import { defaults, fields, calculate, nativeJob } from './design.js';
+import { defaults, fields, calculate, nativeJob, openingRecommendation } from './design.js';
+import { faceViews } from './camera-views.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { CADViewer } from './viewer.js';
@@ -14,7 +15,8 @@ $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
-  $('ref-pcb').checked=refs.pcb;$('ref-pa').checked=refs.pa;$('explode').checked=exploded;
+  for(const component of ['copper','preform','pcb','pa'])$(`ref-${component}`).checked=refs[component];
+  $('explode').checked=exploded;
   $('reference-note').textContent=mode==='assembly'?'PCB／PA 僅位置參考，不參與3D出圖':mode==='layout'?'綠色＝綠漆覆蓋；灰色＝E-PAD開窗，單獨輸出Layout DXF':'目前零件的3D出圖預覽';
 },dimension=>{
   document.querySelectorAll('.dimension-active').forEach(el=>el.classList.remove('dimension-active'));
@@ -39,7 +41,16 @@ for(const group of ['package','stack','pcb','copper','preform','layout']){
     input.step='any';input.min='0';input.max='10000';input.inputMode='decimal';input.required=key!=='thickness_override';input.value=defaults[group][key]??'';
     input.setAttribute('aria-label',`${title} mm`);label.append(input);grid.append(label);
   }
-  details.append(grid);$('fields').append(details);
+  details.append(grid);
+  if(group==='pcb'){
+    const links=document.createElement('div');links.className='linked-controls';
+    links.innerHTML='<label><input id="pcb-auto" type="checkbox" checked>自動連動 M/N</label><select id="pcb-rule" aria-label="PCB 開窗設計規則"><option value="delta">Delta</option><option value="ampleon">Ampleon</option></select><p id="opening-chain"></p>';
+    details.append(links);
+  }
+  if(group==='package'||group==='copper'||group==='stack'){
+    const hint=document.createElement('p');hint.className='group-hint';hint.id=`${group}-derived`;details.append(hint);
+  }
+  $('fields').append(details);
 }
 function formValues(){
   const d={name:$('name').value.trim()};
@@ -49,9 +60,21 @@ function formValues(){
       if(!v&&key!=='thickness_override')throw new Error(`${names[key]} 不可留空。`);
       d[group][key]=v===''?null:Number(v);
     }
-  }return d;
+  }
+  d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
+  return d;
 }
-function fill(d){$('name').value=d.name;for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names))$(`${group}-${key}`).value=d[group][key]??'';}
+function fill(d){$('name').value=d.name;for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names))$(`${group}-${key}`).value=d[group][key]??'';$('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;syncLinkedFields(d);}
+function syncLinkedFields(d){
+  const auto=d.pcb.opening_mode==='auto',chain=openingRecommendation(d);
+  for(const [i,key]of ['opening_length','opening_width'].entries()){
+    const input=$(`pcb-${key}`);input.readOnly=auto;input.setAttribute('aria-readonly',String(auto));
+    input.title=auto?'依 PA 尺寸、公差及開窗規則自動計算；取消「自動連動 M/N」可手動修改。':'手動開窗尺寸';
+    if(auto){input.value=chain.rounded[i];d.pcb[key]=chain.rounded[i];}
+  }
+  $('opening-chain').textContent=`${auto?'自動':'建議'} M/N：最大 PA＋貼片精度＋PCB 公差${chain.factor===.5?' / 2':''} → 向上取 0.1 mm`;
+  return d;
+}
 function status(text){$('status').textContent=text;}
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
 function layoutFor(r){
@@ -61,7 +84,7 @@ function layoutFor(r){
 }
 function refreshPreview(showError=false){
   try{
-    const r=calculate(formValues()),layout=layoutFor(r);draft={results:r,layout};
+    const r=calculate(syncLinkedFields(formValues())),layout=layoutFor(r);draft={results:r,layout};
     viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
     $('download-layout').disabled=false;$('viewer').dataset.previewValid='true';
     $('model-size').textContent=`E ${r.design.copper.base_length} × F ${r.design.copper.base_width} · G ${r.design.copper.base_thickness} mm`;
@@ -74,6 +97,8 @@ function invalidate(){
   clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；按「建立出圖模型」後下載3D零件');},140);
 }
 $('design-form').addEventListener('input',invalidate);
+$('pcb-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
+$('pcb-rule').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('design-form').addEventListener('focusin',event=>{
   if(event.target.type==='number'){
     clearTimeout(previewTimer);refreshPreview();viewer.selectDimension(event.target.name);
@@ -90,10 +115,9 @@ for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addE
   viewer.setMode(mode);if(['copper','preform'].includes(mode)){part=mode;$('export-part').value=mode;}
 });
 $('export-part').addEventListener('change',event=>part=event.target.value);
-$('ref-pcb').addEventListener('change',event=>viewer.setReference('pcb',event.target.checked));
-$('ref-pa').addEventListener('change',event=>viewer.setReference('pa',event.target.checked));
+for(const component of ['copper','preform','pcb','pa'])$(`ref-${component}`).addEventListener('change',event=>viewer.setReference(component,event.target.checked));
 $('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
-for(const view of ['top','iso','front'])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
+for(const view of ['iso',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('help-open').addEventListener('click',()=>$('help-dialog').showModal());
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
@@ -103,6 +127,11 @@ function renderMetrics(r){
   $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ')+' mm';
   $('warnings').replaceChildren(...r.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
   $('layout-summary').textContent=`R ${r.design.layout.border_width} / S ${r.design.layout.epad_size} / T ${r.design.layout.web_width} / ØV ${r.design.layout.hole_clearance} mm`;
+  const pair=values=>values.map(v=>Number(v.toFixed(3))).join(' × ');
+  $('package-derived').textContent=`最大 PA ${pair(r.opening_chain.maximum)} mm（標稱＋公差）`;
+  $('copper-derived').textContent=`凸台 I/H ${r.boss_length} × ${r.boss_width}；HSK 深度 ${r.heatsink_depth.toFixed(2)} mm`;
+  $('stack-derived').textContent=`CuH＝C＋A＋B−SPH−D＋K＝${r.boss_total_height.toFixed(4)} mm`;
+  $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} M/N：最大 PA＋貼片精度＋PCB 公差${r.opening_chain.factor===.5?' / 2':''}；${pair(r.opening_chain.raw)} → ${pair(r.recommended_opening)}（向上取 0.1 mm）`;
 }
 function layoutReport(g,r){return {rules:r.design.layout,grid_pitch:g.pitch,epad_cells:g.cells.length,epad_area_mm2:g.epad_area,mask_area_mm2:g.mask_area,edge_web_margins_mm:g.boundary_margins,chord_tolerance_mm:g.chord_tolerance,notes:g.notes};}
 function requestModel(design) {
@@ -170,7 +199,7 @@ $('download-zip').addEventListener('click', async () => {
       parameters: r.design, results: r, verification: snapshot.verification,
       cad_volumes_mm3: Object.fromEntries(Object.entries(snapshot.parts).map(([key, v]) => [key, v.volume])),
       native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
-    report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange thickness is schematic; SPH fixes the lead reference plane.' };
+    report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange and six pins follow illustrative datasheet proportions; SPH fixes the lead reference plane. Only PA length, width, tolerance and SPH affect manufacturing calculations.' };
     report.layout = layoutReport(snapshot.layout, r);
     files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));

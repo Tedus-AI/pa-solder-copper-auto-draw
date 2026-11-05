@@ -94,3 +94,23 @@ def test_browser_layout_metadata_roundtrip_preserves_manufacturing_geometry(data
     assert design.to_mapping()["layout"] == data["layout"]
     assert updated.boss_volume == original.boss_volume
     assert updated.model_thickness == original.model_thickness
+
+
+def test_browser_auto_opening_and_rule_roundtrip(data):
+    data["pcb"].update(opening_mode="auto", opening_rule="delta")
+    data["package"].update(length=20.62, width=9.83)
+    delta = Design.from_mapping(data)
+    assert (delta.pcb.opening_length, delta.pcb.opening_width) == (21, 10.2)
+    assert (calculate(delta).boss_length, calculate(delta).boss_width) == (20.7, 9.9)
+    data["pcb"]["opening_rule"] = "ampleon"
+    ampleon = Design.from_mapping(data)
+    assert (ampleon.pcb.opening_length, ampleon.pcb.opening_width) == (20.9, 10.1)
+    assert calculate(ampleon).model_thickness != calculate(delta).model_thickness
+    assert Design.from_mapping(ampleon.to_mapping()) == ampleon
+
+
+@pytest.mark.parametrize("key,value", [("opening_mode", True), ("opening_rule", "invalid")])
+def test_invalid_opening_linkage_rejected(data, key, value):
+    data["pcb"][key] = value
+    with pytest.raises(ValueError):
+        Design.from_mapping(data)

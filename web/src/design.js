@@ -1,7 +1,7 @@
 export const defaults = {
   name: 'pa_780_m1p',
   package: { length: 20.57, width: 9.78, max_tolerance: .127, support_height: 1.57 },
-  pcb: { opening_length: 20.9, opening_width: 10.1, thickness: 2, relief_diameter: 2, placement_accuracy: .066, opening_tolerance: .1 },
+  pcb: { opening_length: 20.9, opening_width: 10.1, thickness: 2, relief_diameter: 2, placement_accuracy: .066, opening_tolerance: .1, opening_mode: 'auto', opening_rule: 'delta' },
   copper: { base_length: 40, base_width: 30, base_thickness: 3, corner_radius: 3, hole_diameter: 3, hole_edge_offset: 4, pad_size: 1.5 },
   stack: { lead_solder: .1, board_solder: .1, flange_gap: .3, pad_height: .15 },
   preform: { chamfer: 3.4, trial_delta: .05, thickness_override: null },
@@ -9,7 +9,7 @@ export const defaults = {
 };
 
 export const fields = {
-  package: ['PA 封裝', { length: 'PA 長度', width: 'PA 寬度', max_tolerance: '最大尺寸增量', support_height: '支撐高度 SPH' }],
+  package: ['PA 封裝', { length: 'PA 長度', width: 'PA 寬度', max_tolerance: 'PA 尺寸公差 ±', support_height: '支撐高度 SPH' }],
   pcb: ['PCB 開孔', { opening_length: '開孔長度 M', opening_width: '開孔寬度 N', thickness: 'PCB 厚度 C', relief_diameter: 'Relief 直徑 O', placement_accuracy: '貼片放置精度', opening_tolerance: '開孔公差' }],
   copper: ['銅塊尺寸', { base_length: '基座長度 E', base_width: '基座寬度 F', base_thickness: '基座厚度 G', corner_radius: '四角半徑 R', hole_diameter: '吊掛孔直徑 D', hole_edge_offset: '孔中心距邊 C', pad_size: '小凸台邊長 J' }],
   stack: ['高度堆疊', { lead_solder: '引腳下方錫厚 A', board_solder: '銅塊／PCB 間錫厚 B', flange_gap: 'Flange 至大凸台 D', pad_height: '小凸台高度 K' }],
@@ -20,6 +20,15 @@ export const fields = {
 const zero = new Set(['max_tolerance', 'placement_accuracy', 'opening_tolerance', 'lead_solder', 'board_solder', 'flange_gap', 'trial_delta']);
 const check = (condition, message) => { if (!condition) throw new Error(message); };
 export const ceilTenth = v => Math.ceil(v * 10 - Number.EPSILON * Math.abs(v) * 10) / 10;
+
+// PDF p8: tolerance is added once to the nominal package dimensions.
+// Ampleon uses half of the PCB tolerance; Delta uses the full value.
+export function openingRecommendation(d) {
+  const factor = d.pcb.opening_rule === 'ampleon' ? .5 : 1;
+  const maximum = [d.package.length, d.package.width].map(v => v + d.package.max_tolerance);
+  const raw = maximum.map(v => v + d.pcb.placement_accuracy + d.pcb.opening_tolerance * factor);
+  return { maximum, raw, rounded: raw.map(ceilTenth), factor };
+}
 
 export function normalize(input) {
   check(input && typeof input === 'object' && !Array.isArray(input), '請輸入有效的設計參數。');
@@ -33,10 +42,17 @@ export function normalize(input) {
     for (const key of Object.keys(values)) check(Object.hasOwn(d[group], key), `未知欄位：${group}.${key}`);
     Object.assign(d[group], values);
     for (const [key, v] of Object.entries(d[group])) {
+      if (group === 'pcb' && ['opening_mode', 'opening_rule'].includes(key)) continue;
       if (key === 'thickness_override' && v === null) continue;
       check(typeof v === 'number' && Number.isFinite(v) && v <= 10000 && (zero.has(key) ? v >= 0 : v > 0), `${fields[group][1][key]} 的數值無效。`);
     }
   }
+  // Preserve explicit dimensions in older parameter files that predate linkage.
+  if (input.pcb && !Object.hasOwn(input.pcb, 'opening_mode') &&
+      ['opening_length', 'opening_width'].some(key => Object.hasOwn(input.pcb, key))) d.pcb.opening_mode = 'manual';
+  check(['auto', 'manual'].includes(d.pcb.opening_mode), 'PCB 開窗模式須為 auto 或 manual。');
+  check(['delta', 'ampleon'].includes(d.pcb.opening_rule), 'PCB 開窗規則須為 delta 或 ampleon。');
+  if (d.pcb.opening_mode === 'auto') [d.pcb.opening_length, d.pcb.opening_width] = openingRecommendation(d).rounded;
   return d;
 }
 
@@ -64,7 +80,7 @@ export function calculate(input) {
   check(volume > 0 && area > 0, '體積扣除後錫量或錫片面積非正值。');
   const z = volume / area;
   check(z - t.trial_delta > 0, '試作厚度差值過大，最薄試片須大於零。');
-  const opening = [p.length, p.width].map(v => ceilTenth(v + p.max_tolerance + b.placement_accuracy + b.opening_tolerance));
+  const openingChain = openingRecommendation(d), opening = openingChain.rounded;
   const clearance = (t.chamfer - 2 * c.pad_size) / Math.SQRT2;
   const warnings = [
     '銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。',
@@ -72,12 +88,12 @@ export function calculate(input) {
     `削角與小凸台的解析最近距離為 ${clearance.toFixed(4)} mm，與 PDF 第11頁「約0.37 mm」不同，需工程確認。`,
     '名義體積估算未含全公差堆疊、焊料損耗與空洞率，最終厚度須依製程切片選定。',
   ];
-  if (b.opening_length < opening[0] || b.opening_width < opening[1]) warnings.push(`開孔小於 Delta 規則建議值 ${opening.join(' × ')} mm。`);
+  if (b.opening_length < opening[0] || b.opening_width < opening[1]) warnings.push(`手動開孔小於 ${b.opening_rule === 'delta' ? 'Delta' : 'Ampleon'} 規則建議值 ${opening.join(' × ')} mm。`);
   if (t.thickness_override !== null) warnings.push('模型使用指定錫厚；計算厚度與三款試片仍另列於報告。');
   return { design: d, boss_length: I, boss_width: H, boss_total_height: L, boss_lower_height: L - s.pad_height,
     copper_to_flange: gap, cavity_volume: cavity, boss_volume: boss, solder_volume: volume, preform_area: area,
     calculated_thickness: z, model_thickness: t.thickness_override ?? z, trial_thicknesses: [z - t.trial_delta, z, z + t.trial_delta],
-    recommended_opening: opening, corner_clearance: clearance, heatsink_depth: c.base_thickness + .05, warnings,
+    recommended_opening: opening, opening_chain: openingChain, corner_clearance: clearance, heatsink_depth: c.base_thickness + .05, warnings,
     copper_volume: (c.base_length * c.base_width - (4 - Math.PI) * c.corner_radius ** 2 - 2 * Math.PI * rad ** 2) * c.base_thickness + boss };
 }
 

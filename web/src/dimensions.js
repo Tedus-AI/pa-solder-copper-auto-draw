@@ -15,7 +15,7 @@ export function dimensionFor(key,r,layout) {
   const map={
     'package.length':()=>v([-p.length/2,-p.width/2,z.flange],[p.length/2,-p.width/2,z.flange],'assembly',p.length,'PA flange 長度',[0,-2,0]),
     'package.width':()=>v([p.length/2,-p.width/2,z.flange],[p.length/2,p.width/2,z.flange],'assembly',p.width,'PA flange 寬度',[2,0,0]),
-    'package.max_tolerance':()=>v([p.length/2,0,z.flange],[p.length/2+p.max_tolerance,0,z.flange],'assembly',p.max_tolerance,'PA 最大尺寸增量（非額外零件）',[3,0,2]),
+    'package.max_tolerance':()=>v([p.length/2-p.max_tolerance/2,0,z.flange],[p.length/2+p.max_tolerance/2,0,z.flange],'assembly',p.max_tolerance,`PA 尺寸公差 ±${p.max_tolerance}；虛線為最大外框 ${(p.length+p.max_tolerance).toFixed(3)} × ${(p.width+p.max_tolerance).toFixed(3)} mm`,[3,0,2]),
     'package.support_height':()=>v([I/2,0,z.flange],[I/2,0,z.lead],'assembly',p.support_height,'flange 至引腳底面 SPH',[4,0,0]),
     'pcb.opening_length':()=>v([-b.opening_length/2,0,z.pcbTop],[b.opening_length/2,0,z.pcbTop],'assembly',b.opening_length,'PCB 開孔長度 M',[0,-b.opening_width/2-2,0]),
     'pcb.opening_width':()=>v([0,-b.opening_width/2,z.pcbTop],[0,b.opening_width/2,z.pcbTop],'assembly',b.opening_width,'PCB 開孔寬度 N',[b.opening_length/2+3,0,0]),
