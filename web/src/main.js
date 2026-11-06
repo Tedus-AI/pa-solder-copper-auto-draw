@@ -82,8 +82,8 @@ const uiGroups=[
   {id:'copper',title:'銅塊基座',paths:groupPaths('copper').filter(path=>path!=='copper.pad_size'),open:true},
   {id:'boss',title:'中凸台／四角小凸台',paths:[...groupPaths('boss'),'copper.pad_size','stack.pad_height'].filter(hasPath),open:true},
   {id:'stack',title:'高度堆疊',paths:groupPaths('stack').filter(path=>path!=='stack.pad_height'),open:true},
-  {id:'preform',title:'錫片設計',paths:groupPaths('preform'),open:false},
-  {id:'layout',title:'綠漆／E-PAD',paths:groupPaths('layout'),open:false},
+  {id:'preform',title:'錫片設計',paths:groupPaths('preform'),open:true},
+  {id:'layout',title:'綠漆／E-PAD',paths:groupPaths('layout'),open:true},
 ];
 const controlColumns=[0,1].map(index=>{const column=document.createElement('div');column.className='control-column';column.dataset.column=index;$('fields').append(column);return column;});
 for(const group of uiGroups){

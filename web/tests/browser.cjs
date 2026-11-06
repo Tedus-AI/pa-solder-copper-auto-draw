@@ -9,9 +9,11 @@ const { unzipSync, strFromU8 } = require('fflate');
 (async () => {
   const output = process.env.TEST_OUTPUT || '/tmp/pa-cad-web-test'; fs.mkdirSync(output, { recursive: true });
   const liveSmoke=process.env.SMOKE_ONLY==='1';
+  const shardCount=Number(process.env.ANNOTATION_SHARD_COUNT||1),shardIndex=Number(process.env.ANNOTATION_SHARD_INDEX||0);
   let server, browser, page;
   const url = process.env.BASE_URL || 'http://127.0.0.1:4173/pa-solder-copper-auto-draw/';
   try {
+    assert.ok(Number.isInteger(shardCount)&&shardCount>0&&shardCount<=32&&Number.isInteger(shardIndex)&&shardIndex>=0&&shardIndex<shardCount,'Invalid annotation shard');
     if (!process.env.BASE_URL) server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4173', '--strictPort'], { stdio: 'pipe' });
     let available = false;
     for (let i = 0; i < 60; i++) { try { const r = await fetch(url); if (r.ok) { available = true; break; } } catch {} await new Promise(r => setTimeout(r, 1000)); }
@@ -74,7 +76,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(inputNames.length,32);
     // The build verifies every field in every view. The deployed-site run
     // repeats representative geometry from each component plus all CAD exports.
-    const annotationNames=liveSmoke?['package.length','package.support_height','pcb.relief_diameter','copper.corner_radius','copper.hole_diameter','boss.total_height','preform.thickness_override','layout.hole_clearance']:inputNames;
+    const annotationNames=liveSmoke?['package.length','package.support_height','pcb.relief_diameter','copper.corner_radius','copper.hole_diameter','boss.total_height','preform.thickness_override','layout.hole_clearance']:inputNames.filter((_,i)=>i%shardCount===shardIndex);
     const allViews=['top','bottom','front','back','left','right','iso'];
     const focusNominal=async key=>{const input=page.locator(`input[name="${key}"]`);await input.evaluate(el=>{el.closest("details").open=true;});await input.focus();};
     const checkAnnotation=async(key,requireLabel=true)=>{
@@ -293,7 +295,8 @@ const { unzipSync, strFromU8 } = require('fflate');
     }
     await review.close();
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${url} — ${liveSmoke?'eight representative dimensions':'all 32 dimensions'} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
+    const coverage=liveSmoke?'eight representative dimensions':shardCount>1?`${annotationNames.length} dimensions (shard ${shardIndex+1}/${shardCount})`:'all 32 dimensions';
+    console.log(`PASS: ${url} — ${coverage} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
   } catch (e) {
     console.error(e);process.exitCode=1;
     let diagnostic='';

@@ -16,11 +16,15 @@ permissions:
 
 concurrency:
   group: github-pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        annotation_shard: [0, 1, 2, 3]
     defaults:
       run:
         working-directory: web
@@ -38,14 +42,18 @@ jobs:
       - run: npm run test:browser
         env:
           TEST_OUTPUT: test-results
+          ANNOTATION_SHARD_COUNT: '4'
+          ANNOTATION_SHARD_INDEX: ${{ matrix.annotation_shard }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: build-browser-check
+          name: build-browser-check-${{ matrix.annotation_shard }}
           path: web/test-results
           if-no-files-found: ignore
       - uses: actions/configure-pages@v5
+        if: matrix.annotation_shard == 0
       - uses: actions/upload-pages-artifact@v3
+        if: matrix.annotation_shard == 0
         with:
           path: web/dist
 

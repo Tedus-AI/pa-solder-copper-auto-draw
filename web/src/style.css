@@ -127,3 +127,9 @@
 @media(max-width:700px){
   .control-column{display:contents}.control-group{width:100%;align-self:stretch}.field-grid .dimension-row>label{display:flex;align-items:center;white-space:nowrap}.dimension-caption{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 }
+@media(min-width:981px) and (max-height:950px){
+  .control-column{gap:4px}.control-group summary{height:23px;padding-top:3px;padding-bottom:3px}
+  .tolerance-grid,.field-grid{padding:2px 5px 3px;row-gap:0}.dimension-row{height:23px;min-height:23px}
+  .controls .dimension-row input{height:21px;min-height:21px;padding-top:1px;padding-bottom:1px}
+  .linked-controls{padding-bottom:3px;gap:3px}.group-hint{padding-bottom:3px}.gap-analysis{margin-bottom:3px;padding-top:3px;padding-bottom:3px}
+}
