@@ -64,6 +64,28 @@ def test_path_traversal_name_rejected(data):
         Design.from_mapping(data)
 
 
+def test_project_display_metadata_roundtrips_without_changing_design_geometry(data):
+    original = Design.from_mapping(data)
+    original_result = calculate(original)
+    data["project"] = {"name": "  基地台 PA 專案 / A  ", "pa_model": '  H-37248KC-6/2 "Rev A"  '}
+    updated = Design.from_mapping(data)
+    assert updated.name == original.name
+    assert updated.to_mapping()["project"] == {"name": "基地台 PA 專案 / A", "pa_model": 'H-37248KC-6/2 "Rev A"'}
+    assert calculate(updated) == original_result
+    assert Design.from_mapping(updated.to_mapping()) == updated
+    data["project"]["pa_model"] = " "
+    assert Design.from_mapping(data).project.pa_model == ""
+    assert original.project.name == "未命名專案"
+
+
+@pytest.mark.parametrize("project", [None, {"name": ""}, {"name": "a"*101},
+                                     {"pa_model": None}, {"name": "row\nbreak"}, {"unexpected": "x"}])
+def test_invalid_project_display_metadata_is_rejected(data, project):
+    data["project"] = project
+    with pytest.raises(ValueError):
+        Design.from_mapping(data)
+
+
 def test_no_inferred_base_dimensions(data):
     del data["copper"]["base_length"]
     with pytest.raises(ValueError):

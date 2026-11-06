@@ -3,6 +3,7 @@ import { copperFootprint, roundedBaseDistance } from './copper-geometry.js';
 
 export const defaults = {
   name:'pa_780_m1p',
+  project:{name:'未命名專案',pa_model:'H-37248KC-6/2'},
   package:{length:20.57,width:9.78,max_tolerance:.127,support_height:1.57},
   pcb:{opening_length:20.9,opening_width:10.1,thickness:2,relief_diameter:2,opening_mode:'auto',opening_rule:'delta'},
   copper:{base_length:40,base_width:30,base_thickness:3,corner_radius:3,hole_diameter:3,hole_edge_offset:4,pad_size:1.5},
@@ -15,8 +16,8 @@ export const defaults = {
 export const fields={
   package:['PA 封裝',{length:'PA 長度',width:'PA 寬度',support_height:'支撐高度 SPH'}],
   pcb:['PCB 開孔',{opening_length:'開孔長度 M',opening_width:'開孔寬度 N',thickness:'PCB 厚度 C',relief_diameter:'避空孔徑 O'}],
-  copper:['銅塊基座',{base_length:'基座長度 E',base_width:'基座寬度 F',base_thickness:'基座厚度 G',corner_radius:'四角半徑 R',hole_diameter:'吊掛孔徑 D',hole_edge_offset:'孔中心距邊 C',pad_size:'小凸台邊長 J'}],
-  boss:['中凸台／小凸台',{length:'中凸台長度 I',width:'中凸台寬度 H',total_height:'凸台總高 L',center_from_left:'中心距左邊 Xc',center_from_bottom:'中心距下邊 Yc'}],
+  copper:['銅塊',{base_length:'基座長度 E',base_width:'基座寬度 F',base_thickness:'基座厚度 G',corner_radius:'四角半徑 R',hole_diameter:'吊掛孔徑 D',hole_edge_offset:'孔中心距邊 C',pad_size:'小凸台邊長 J'}],
+  boss:['中凸台／小凸台',{length:'中凸台長度 I',width:'中凸台寬度 H',total_height:'中凸台總高 L',center_from_left:'中心距左邊 Xc',center_from_bottom:'中心距下邊 Yc'}],
   stack:['高度堆疊',{lead_solder:'引腳下錫厚 A',board_solder:'銅塊／PCB 錫厚 B',flange_gap:'PA 至中凸台 D',pad_height:'小凸台高度 K'}],
   preform:['錫片設計',{length:'錫片長度 W',width:'錫片寬度 X',chamfer:'45° 削角 Y',trial_delta:'試片厚度增減量',thickness_override:'指定錫厚 Z（留空自動）'}],
   layout:['綠漆／E-PAD',{border_width:'外框綠漆 R',epad_size:'E-PAD 邊長 S',web_width:'格間綠漆 T',hole_clearance:'定位孔避讓 V'}],
@@ -39,7 +40,16 @@ export function normalize(input){
   check(input&&typeof input==='object'&&!Array.isArray(input),'請輸入有效的設計參數。');
   for(const key of Object.keys(input))check(Object.hasOwn(defaults,key),`未知欄位：${key}`);
   const d=structuredClone(defaults);d.name=input.name??d.name;
-  check(typeof d.name==='string'&&/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(d.name),'設計名稱須以英文字母開頭，使用英數字、_ 或 -，最多40字。');
+  check(typeof d.name==='string'&&/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(d.name),'CAD 檔名代碼須以英文字母開頭，使用英數字、_ 或 -，最多40字。');
+  const project=Object.hasOwn(input,'project')?input.project:{};
+  check(project&&typeof project==='object'&&!Array.isArray(project),'專案資料須為設定物件。');
+  for(const key of Object.keys(project))check(Object.hasOwn(d.project,key),`未知專案欄位：${key}`);
+  for(const key of Object.keys(d.project)){
+    const value=Object.hasOwn(project,key)?project[key]:d.project[key];
+    check(typeof value==='string'&&!/[\u0000-\u001f\u007f]/.test(value),`${key==='name'?'專案名稱':'PA 型號'}須為單行文字。`);
+    d.project[key]=value.trim();
+    check(d.project[key].length<=100&&(key!=='name'||d.project[key].length>0),`${key==='name'?'專案名稱':'PA 型號'}長度須為${key==='name'?'1':'0'}至100字。`);
+  }
   for(const group of Object.keys(fields)){
     const values=input[group]??{};check(values&&typeof values==='object'&&!Array.isArray(values),`${group} 須為設定物件。`);
     for(const key of Object.keys(values))check(Object.hasOwn(d[group],key)||(group==='pcb'&&['placement_accuracy','opening_tolerance'].includes(key)),`未知欄位：${group}.${key}`);
@@ -64,7 +74,7 @@ export function normalize(input){
   if(input.pcb&&!Object.hasOwn(input.pcb,'opening_mode')&&['opening_length','opening_width'].some(k=>Object.hasOwn(input.pcb,k)))d.pcb.opening_mode='manual';
   check(['auto','manual'].includes(d.pcb.opening_mode),'PCB 開窗模式須為 auto 或 manual。');check(['delta','ampleon'].includes(d.pcb.opening_rule),'PCB 開窗規則須為 delta 或 ampleon。');
   check(['auto','manual'].includes(d.boss.size_mode),'中凸台長寬模式須為 auto 或 manual。');
-  check(d.boss.height_mode==='auto','PPT 第六頁：凸台總高 L 固定依高度堆疊自動計算。');
+  check(d.boss.height_mode==='auto','PPT 第六頁：中凸台總高 L 固定依高度堆疊自動計算。');
   check(d.stack.lead_solder===.1&&d.stack.board_solder===.1&&d.stack.flange_gap===.3,'PPT 第六頁的 A、B、D 採固定建議值 0.1／0.1／0.3 mm；調整 PCB 厚度與小凸台 K。');
   if(!input.boss||!Object.hasOwn(input.boss,'center_from_left'))d.boss.center_from_left=d.copper.base_length/2;
   if(!input.boss||!Object.hasOwn(input.boss,'center_from_bottom'))d.boss.center_from_bottom=d.copper.base_width/2;
@@ -77,12 +87,12 @@ export function normalize(input){
 export function gapAnalysis(d){
   const axis=(windowKey,paKey,w,p)=>{const window=dimensionRange(d,windowKey,w),pa=dimensionRange(d,paKey,p);return{nominal:(w-p)/2,min:(window.min-pa.max)/2,max:(window.max-pa.min)/2,window,pa};};
   const x=axis('pcb.opening_length','package.length',d.pcb.opening_length,d.package.length),y=axis('pcb.opening_width','package.width',d.pcb.opening_width,d.package.width);
-  return{x,y,overlap:x.min<0||y.min<0,assumptions:['PA 金屬底座與 PCB 開窗同心。','使用尺寸公差極限；不含偏心、旋轉或貼片位置誤差。','共同跟隨中凸台移位，不改變 PA／開窗相對中心。']};
+  return{x,y,overlap:x.min<0||y.min<0,concentric:true,assumptions:['固定設計條件：PA 金屬底座與 PCB 開窗保持同心。','Typ. 是未加公差的設計尺寸；最小與最大由上下公差推算。','共同跟隨中凸台移位，兩者共用同一中心。']};
 }
 export function calculate(input){
   const d=normalize(input),p=d.package,b=d.pcb,c=d.copper,s=d.stack,t=d.preform,q=d.boss;
   const I=q.length,H=q.width,L=q.total_height,gap=L+s.flange_gap-s.pad_height,center=[q.center_from_left-c.base_length/2,q.center_from_bottom-c.base_width/2];
-  check(L>s.pad_height&&gap>L,'高度堆疊無效：凸台總高 L 必須大於小凸台高度 K，PA 底面必須高於小凸台。');
+  check(L>s.pad_height&&gap>L,'高度堆疊無效：中凸台總高 L 必須大於小凸台高度 K，PA 底面必須高於小凸台。');
   check([2.5,3].includes(c.base_thickness),'規範基座厚度 G 為 2.5 或 3.0 mm。');
   check(c.corner_radius<Math.min(c.base_length,c.base_width)/2,'銅塊四角半徑超出基座範圍。');
   check(c.base_length>b.opening_length&&b.opening_length>=I&&c.base_width>b.opening_width&&b.opening_width>=H,'基座須大於 PCB 開孔，開孔不可小於中凸台。');
@@ -103,7 +113,7 @@ export function calculate(input){
   check(volume>0&&area>0,'體積扣除後錫量或錫片面積非正值。');const z=volume/area;
   check(z-t.trial_delta>0,'試作厚度差值過大，最薄試片須大於零。');
   const openingChain=openingRecommendation(d),clearance=(t.chamfer-2*c.pad_size)/Math.SQRT2,analysis=gapAnalysis(d);
-  const warnings=['銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。','未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。','PDF 第12頁為 Z ±0.05 mm，第13頁表格為 ±0.15 mm；試片增減量與 Z 製造公差 ±0.02 mm 分開。',`削角與小凸台的解析最近距離為 ${clearance.toFixed(4)} mm，與 PDF 第11頁約0.37 mm 不同。`,'錫厚仍為名義尺寸體積估算，未含全公差錫量堆疊、損耗與空洞率。'];
+  const warnings=['銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。','未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。','PDF 第12頁為 Z ±0.05 mm，第13頁表格為 ±0.15 mm；試片增減量與 Z 製造公差 ±0.02 mm 分開。',`削角與小凸台的解析最近距離為 ${clearance.toFixed(4)} mm，與 PDF 第11頁約0.37 mm 不同。`,'錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。'];
   if(footprint.breakouts)warnings.push('吊掛孔已穿破圓角／外緣；預覽與出圖保留實際缺口。');
   if(footprint.outside_holes)warnings.push('有吊掛孔刀具圓未切到圓角基座，實際模型不會出現該孔。');
   if(footprint.tangent_holes)warnings.push('孔與基座外形恰好相接；顯示實際輪廓，出圖仍會驗證單一實體。');
@@ -111,7 +121,7 @@ export function calculate(input){
   if(analysis.overlap)warnings.push('PA／PCB 單邊最小間隙為負值，公差極限下可能干涉。');
   if(I+getTolerance(d,'boss.length').plus>b.opening_length-getTolerance(d,'pcb.opening_length').minus||H+getTolerance(d,'boss.width').plus>b.opening_width-getTolerance(d,'pcb.opening_width').minus)warnings.push('中凸台最大尺寸大於 PCB 最小開孔，公差極限下凸台可能與開孔干涉。');
   if(b.opening_length<openingChain.rounded[0]||b.opening_width<openingChain.rounded[1])warnings.push(`手動開孔小於 ${b.opening_rule} 規則建議值 ${openingChain.rounded.join(' × ')} mm。`);
-  if(q.size_mode==='manual')warnings.push('中凸台 I/H 使用手動名義尺寸；錫片 W/X 跟隨中凸台。');
+  if(q.size_mode==='manual')warnings.push('中凸台 I/H 使用手動設計尺寸（Typ.）；錫片 W/X 跟隨中凸台。');
   if(t.thickness_override!==null)warnings.push('模型使用指定錫厚，計算厚度與試片另外列出。');
   const ranges={};for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names)){const value=key==='thickness_override'?t.thickness_override??z:d[group][key];ranges[`${group}.${key}`]=dimensionRange(d,`${group}.${key}`,value);}
   return{design:d,boss_length:I,boss_width:H,boss_total_height:L,boss_lower_height:L-s.pad_height,boss_center:center,

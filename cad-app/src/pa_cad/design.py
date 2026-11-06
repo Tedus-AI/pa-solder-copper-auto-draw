@@ -1,4 +1,4 @@
-"""Nominal design rules transcribed from pages 3–13 of the supplied specification."""
+"""Design dimensions (Typ.) transcribed from pages 3–13 of the specification."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, field, replace
@@ -80,6 +80,13 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class Project:
+    """Display metadata; independent of the safe CAD file name and geometry."""
+    name: str = "未命名專案"
+    pa_model: str = "H-37248KC-6/2"
+
+
+@dataclass(frozen=True)
 class Design:
     name: str
     package: Package
@@ -90,6 +97,7 @@ class Design:
     layout: Layout = field(default_factory=Layout)
     boss: Boss = field(default_factory=Boss)
     tolerances: dict = field(default_factory=dict)
+    project: Project = field(default_factory=Project)
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -102,6 +110,20 @@ class Design:
             r"[A-Za-z][A-Za-z0-9_-]{0,39}", data["name"]
         ):
             raise ValueError("name 須為英文字母開頭、最多 40 個英數字或 _ -")
+        project_data = data.get("project", {})
+        if not isinstance(project_data, dict):
+            raise ValueError("project 必須是 mapping")
+        if unknown := set(project_data)-{"name", "pa_model"}:
+            raise ValueError(f"未知專案欄位: {sorted(unknown)}")
+        project_values = asdict(Project())
+        for key, value in project_data.items():
+            if not isinstance(value, str) or re.search(r"[\x00-\x1f\x7f]", value):
+                raise ValueError(f"project.{key} 須為單行文字")
+            value = value.strip()
+            if len(value) > 100 or (key == "name" and not value):
+                raise ValueError(f"project.{key} 須為最多 100 字的有效文字")
+            project_values[key] = value
+        project = Project(**project_values)
         groups = {}
         for name, typ in (("package", Package), ("pcb", PCB), ("copper", Copper),
                           ("stack", Stack), ("preform", Preform), ("layout", Layout), ("boss", Boss)):
@@ -150,7 +172,7 @@ class Design:
                     raise ValueError(f"{key} 公差須為有限非負數值")
             if "source" in pair and not isinstance(pair["source"], str):
                 raise ValueError(f"{key} 公差來源須為文字")
-        design = cls(data["name"], **groups, tolerances=tolerances)
+        design = cls(data["name"], **groups, tolerances=tolerances, project=project)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
@@ -286,7 +308,7 @@ def calculate(d: Design) -> Result:
     warnings = [
         "銅塊外形 E/F 為使用者輸入，須由 thermal / RF 設計確認；範例 40×30 mm 並非 PDF 規定。",
         "PDF 第12頁為 Z±0.05 mm，第13頁表格為 ±0.15 mm；本次依輸入 trial_delta 計算。",
-        "名義尺寸體積估算未含公差堆疊、焊料損耗及空洞率；最終厚度依切片結果選定。",
+        "依設計尺寸（Typ.）估算的體積未含公差堆疊、焊料損耗及空洞率；最終厚度依切片結果選定。",
     ]
     clearance = (t.chamfer - 2 * c.pad_size) / math.sqrt(2)
     warnings.append(f"依四角 J×J 凸台與45度削角計算最近距離為 {clearance:.4f} mm；PDF 第11頁約0.37 mm，須確認。")
@@ -294,7 +316,9 @@ def calculate(d: Design) -> Result:
         warnings.append(f"PCB 手動開孔小於 {b.opening_rule.title()} 規則向上進位的建議值 {recommended[0]}×{recommended[1]} mm。")
     if t.thickness_override is not None:
         warnings.append("模型採用指定的 thickness_override；計算厚度與三款試片仍另列於報告。")
-    analysis = {"overlap": False, "assumptions": ["PA 與 PCB 開窗同心；僅使用尺寸上下公差，不扣除貼片精度。", "未指定的公差暫按零計算，並非零公差製造規格。"]}
+    analysis = {"overlap": False, "concentric": True,
+                "assumptions": ["固定設計條件：PA 底座與 PCB 開窗同心。間隙僅依尺寸上下公差計算。",
+                                "未指定的公差暫按零計算，並非零公差製造規格。"]}
     for axis, pa, opening in (("x", p.length, b.opening_length), ("y", p.width, b.opening_width)):
         name = "length" if axis == "x" else "width"
         pm, pp = tolerance(d, "package."+name)

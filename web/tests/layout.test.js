@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import clipping from 'polygon-clipping';
 import { calculate, defaults, fields } from '../src/design.js';
-import { layoutGeometry, layoutDxf, area } from '../src/layout.js';
+import { layoutGeometry, layoutDxf, area, rectangle } from '../src/layout.js';
 import { dimensionFor, referenceLevels } from '../src/dimensions.js';
 const r=calculate(defaults),g=layoutGeometry(r);
 const near=(a,b,tol=1e-6)=>assert.ok(Math.abs(a-b)<tol,`${a} != ${b}`);
@@ -33,6 +33,17 @@ test('mask settings cannot alter copper/preform manufacturing volumes',()=>{
   const changed=calculate(d),cg=layoutGeometry(changed);
   near(changed.copper_volume,r.copper_volume);near(changed.model_thickness,r.model_thickness);
   assert.notEqual(cg.cells.length,g.cells.length);
+});
+test('PCB reference only contains its PA window, not copper mounting holes',()=>{
+  assert.equal(g.board.length,1);assert.equal(g.board[0].length,2);
+  for(const [x,y]of g.centers){
+    const probe=rectangle(x,y,.2,.2);
+    near(area(clipping.intersection(g.board,probe)),.04);
+    near(area(clipping.intersection(g.copperProfile,probe)),0);
+  }
+  const d=structuredClone(defaults);d.copper.hole_diameter=1;
+  const changed=calculate(d),cg=layoutGeometry(changed);
+  assert.deepEqual(cg.board,g.board);assert.notEqual(changed.copper_volume,r.copper_volume);
 });
 test('Layout DXF encodes mm, distinct polarity layers and hatch holes',()=>{
   const text=layoutDxf(r,g);

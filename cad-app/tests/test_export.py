@@ -72,6 +72,15 @@ def test_round_features_use_native_dimensions_quantities_and_center_lines(bundle
     assert diameter.dxf.text == "2-%%cD = 3.00 mm"
     assert radius.get_measurement() == pytest.approx(d.copper.corner_radius)
     assert diameter.get_measurement() == pytest.approx(d.copper.hole_diameter)
+    radial_entities = list(radius.virtual_entities())
+    radial_lines = [entity for entity in radial_entities if entity.dxftype() == "LINE"]
+    assert radial_lines
+    center = radius.dxf.defpoint
+    assert all((point-center).magnitude >= d.copper.corner_radius-1e-8
+               for entity in radial_lines for point in (entity.dxf.start, entity.dxf.end))
+    assert not any(entity.dxftype() == "POINT" for entity in radial_entities)
+    radial_text = next(entity for entity in radial_entities if entity.dxftype() == "MTEXT")
+    assert 1 < radial_text.get_rotation() % 180 < 89
     centers = msp.query('LINE[layer=="CENTER"]')
     assert len(centers) == 4
     assert doc.layers.get("CENTER").dxf.linetype == "PA_CENTER"

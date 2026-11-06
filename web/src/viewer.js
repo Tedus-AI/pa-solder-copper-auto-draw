@@ -28,7 +28,7 @@ function dispose(group) {
 export class CADViewer {
   constructor(container,onMode=()=>{},onDimension=()=>{}) {
     this.el=container;this.onMode=onMode;this.onDimension=onDimension;
-    this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;
+    this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:false};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
     this.scene=new THREE.Scene();this.camera=createCADCamera();this.camera.position.set(50,-60,50);
     this.target=new THREE.Vector3();this.models=new THREE.Group();this.scene.add(this.models);
     this.overlay=svgNode('svg',{'class':'dimension-overlay','aria-label':'尺寸定位標註'});container.append(this.overlay);
@@ -100,7 +100,7 @@ export class CADViewer {
     if(!this.r)return;
     dispose(this.models);this.models.clear();
     const r=this.r,d=r.design,c=d.copper,p=d.package,z=referenceLevels(r),layout=this.layout,center=r.boss_center||[0,0];
-    const assembly=this.mode==='assembly', mask=this.mode==='layout';
+    const assembly=this.mode==='assembly', mask=this.mode==='layout'&&this.refs.epad;
     const solderZ=assembly?z.boss+(this.exploded?3:0):0;
     if(this.mode!=='preform'&&this.refs.copper) {
       if(!this.cadPart('copper',0,mask?.2:1)) {
@@ -134,7 +134,7 @@ export class CADViewer {
         }
       }
     }
-    if(mask) {this.plane(layout.mask,z.base+.025,0x277b53,'mask');this.plane(layout.pads,z.base+.028,0xc4c9c1,'epad');}
+    if(this.refs.epad&&(assembly||this.mode==='layout')) {this.plane(layout.mask,z.base+.025,0x277b53,'mask');this.plane(layout.pads,z.base+.028,0xc4c9c1,'epad');}
     this.scale=this.mode==='preform'?Math.max(r.boss_length,r.boss_width):Math.max(c.base_length,c.base_width)+(assembly?10:4);
     if(this.keyLight){const extent=Math.max(25,this.scale*.9),camera=this.keyLight.shadow.camera;Object.assign(camera,{left:-extent,right:extent,top:extent,bottom:-extent,near:.1,far:Math.max(300,this.scale*6)});camera.updateProjectionMatrix();this.keyLight.position.set(this.scale*.6,-this.scale*.85,this.scale*1.3);this.renderer.shadowMap.needsUpdate=true;}
     const top=assembly?Math.max(z.pcbTop,z.flange+paReference(p).totalHeight)+(this.exploded?12:0):this.mode==='preform'?r.model_thickness:z.pad;
@@ -166,7 +166,7 @@ export class CADViewer {
     }this.el.prepend(svg);
   }
   setMode(mode,fit=true) {
-    this.mode=mode;this.toleranceFocus=null;this.clearAnnotation();this.key=null;this.renderModels();if(fit)this.setView(mode==='layout'?'top':'iso');
+    this.mode=mode;if(mode==='layout')this.refs.epad=true;this.toleranceFocus=null;this.clearAnnotation();this.key=null;this.renderModels();if(fit)this.setView(mode==='layout'?'top':'iso');
   }
   setReference(component,visible){this.refs[component]=visible;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();}
   setExploded(value){this.exploded=value;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();this.setView('iso');}
@@ -196,6 +196,7 @@ export class CADViewer {
     const vertical=d&&Math.abs(bv.y-av.y)>Math.abs(bv.x-av.x);
     const feature=d&&['radius','diameter','envelope'].includes(d.kind);
     let top=24;const bottom=d?(width<600?94:Math.max(90,this.labelHeight()+62)):32;
+    if(d?.kind==='radius'&&width<600)top=Math.max(top,this.labelWidth()+26);
     const side=d&&(vertical||feature)&&width>=600?(feature&&bv.x<0?'left':'right'):null;
     const left=side==='left'?this.labelWidth()+66:32,right=side==='right'?this.labelWidth()+66:38;
     const usableW=Math.max(70,width-left-right),cx=left+usableW/2;
@@ -218,7 +219,13 @@ export class CADViewer {
     this.el.dataset.projection=this.camera.isOrthographicCamera?'orthographic':'perspective';
     this.updateAnnotation();
   }
-  markView(view){this.el.dataset.cameraView=view;document.querySelectorAll('[data-camera-view]').forEach(el=>{if(el.tagName==='BUTTON')el.setAttribute('aria-pressed',String(el.dataset.cameraView===view));});}
+  markView(view){
+    this.el.dataset.cameraView=view;
+    if(['top','bottom','front','back','left','right'].includes(view))this.lastOrthographicView=view;
+    document.querySelectorAll('[data-camera-view]').forEach(el=>{if(el.tagName==='BUTTON'){const active=el.dataset.cameraView===view;el.setAttribute('aria-pressed',String(active));el.classList.toggle('active',active);}});
+    const orthographic=document.getElementById('view-orthographic');
+    if(orthographic){const active=view!=='iso';orthographic.classList.toggle('active',active);orthographic.setAttribute('aria-pressed',String(active));}
+  }
   clearAnnotation({keepEnvelope=false}={}){this.overlay.replaceChildren();this.activeDimension=null;this.el.dataset.dimension='';delete this.el.dataset.annotationLayout;if(!keepEnvelope){for(const child of [...this.models.children])if(child.userData.annotation==='pa_envelope'){this.models.remove(child);dispose(child);}if(this.worldBounds)this.worldBounds=new THREE.Box3().setFromObject(this.models);}this.onDimension(null);}
   labelWidth(){const measured=this.activeDimension?Math.ceil(this.textMeasure.measureText(this.activeDimension.label).width)+24:116;return Math.max(116,measured,this.activeDimension?.datums&&this.el.clientWidth>=600?150:0);}
   labelHeight(){return this.activeDimension?.datums&&this.el.clientWidth>=600?65:32;}
@@ -243,7 +250,7 @@ export class CADViewer {
     }
     const choices=candidates.map((world,index)=>{
       const layout=annotationLayout({a:this.project(world.a),b:this.project(world.b),bounds,width,height,labelWidth:this.labelWidth(),labelHeight:this.labelHeight(),obstacles,kind:d.kind});
-      const path=['radius','diameter','envelope'].includes(d.kind)?featureLeader(layout.a,layout.b,bounds,layout.label,layout.side):[];
+      const path=d.kind==='radius'?layout.leader:['diameter','envelope'].includes(d.kind)?featureLeader(layout.a,layout.b,bounds,layout.label,layout.side):[];
       const length=path.slice(1).reduce((sum,p,i)=>sum+Math.hypot(p[0]-path[i][0],p[1]-path[i][1]),0);
       return{world,index,layout,path,length,score:layout.label?length:Infinity};
     });
@@ -274,12 +281,17 @@ export class CADViewer {
     let arrowA=layout.aa,arrowB=layout.bb;
     if(isEnvelope){
       if(chosen.path.length)line(chosen.path,{class:'dimension-leader'});
-    }else if(isRadius||isDiameter){
+    }else if(isRadius){
+      // Outside-only radial leader, with its single arrow at the actual arc.
+      // The construction centre can be hidden by a hole or boss and is not a
+      // physical point to highlight on the part.
+      arrowA=layout.aa;arrowB=layout.b;
+      if(chosen.path.length)line(chosen.path,{class:'dimension-leader'});
+    }else if(isDiameter){
       // Radius and diameter use the actual projected radial/diametral line,
       // rather than a horizontal component of that line labelled as a radius.
       arrowA=layout.a;arrowB=layout.b;line([arrowA,arrowB]);
       if(chosen.path.length)line(chosen.path,{class:'dimension-leader'});
-      if(isRadius){const [x,y]=layout.a;line([[x-4,y],[x+4,y]],{class:'dimension-center'});line([[x,y-4],[x,y+4]],{class:'dimension-center'});}
     }else{
       extension(layout.a,layout.aa);extension(layout.b,layout.bb);line([layout.aa,layout.bb]);
       if(layout.leader.length)line(layout.leader,{class:'dimension-leader'});
@@ -293,18 +305,25 @@ export class CADViewer {
         this.overlay.append(svgNode('polygon',{points:[p,[base[0]+n[0]*2.8,base[1]+n[1]*2.8],[base[0]-n[0]*2.8,base[1]-n[1]*2.8]].map(v=>v.join(',')).join(' '),class:'dimension-arrow'}));
       }
     }
-    for(const p of isEnvelope?[layout.b]:[layout.a,layout.b]){
+    for(const p of isEnvelope||isRadius?[layout.b]:[layout.a,layout.b]){
       markers.append(svgNode('circle',{cx:p[0],cy:p[1],r:7,class:'dimension-halo'}),svgNode('circle',{cx:p[0],cy:p[1],r:3,class:'dimension-point'}));
     }
     this.overlay.append(markers);
     if(layout.label){
       const box=layout.label,group=svgNode('g',{class:'dimension-value'}),cx=(box.left+box.right)/2;
-      group.append(svgNode('rect',{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top,rx:5}));
-      const text=svgNode('text',{x:cx,y:box.top+21,class:'dimension-number'});text.textContent=d.label;group.append(text);
+      if(isRadius&&layout.textTransform){
+        const t=layout.textTransform,local=layout.labelLocal;
+        group.setAttribute('transform',`translate(${t.x} ${t.y}) rotate(${t.angle})`);
+        group.append(svgNode('rect',{x:local.left,y:local.top,width:local.width,height:local.height,rx:5}));
+        const text=svgNode('text',{x:0,y:5,class:'dimension-number'});text.textContent=d.label;group.append(text);
+      }else{
+        group.append(svgNode('rect',{x:box.left,y:box.top,width:box.right-box.left,height:box.bottom-box.top,rx:5}));
+        const text=svgNode('text',{x:cx,y:box.top+21,class:'dimension-number'});text.textContent=d.label;group.append(text);
+      }
       if(d.datums&&width>=600)d.datums.forEach((value,i)=>{const text=svgNode('text',{x:cx,y:box.top+39+i*15,class:'dimension-datum-text'});text.textContent=value;group.append(text);});
       this.overlay.append(group);
     }
-    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:chosen.world.a,worldB:chosen.world.b,kind:d.kind,referenceCandidate:chosen.index,leaderLength:chosen.length});
+    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:chosen.world.a,worldB:chosen.world.b,kind:d.kind,referenceCandidate:chosen.index,leaderLength:chosen.length,labelAngle:layout.textTransform?.angle||0,radiusLeaderStraight:isRadius,markerCount:isRadius||isEnvelope?1:2});
   }
   selectTolerance(key,fit=true){this.selectDimension(key,fit,{tolerance:true});}
   selectDimension(key,fit=true,{tolerance=false}={}) {
@@ -325,6 +344,7 @@ export class CADViewer {
       if(key.startsWith('pcb.')||key.startsWith('stack.'))this.refs.pcb=true;
       if(dimension.mode==='copper'||dimension.mode==='layout'||key.startsWith('stack.'))this.refs.copper=true;
       if(dimension.mode==='preform')this.refs.preform=true;
+      if(dimension.mode==='layout')this.refs.epad=true;
     }
     const changed=this.mode!==dimension.mode;this.mode=dimension.mode;
     this.clearAnnotation({keepEnvelope:true});this.key=key;this.activeDimension={...dimension,label:this.toleranceFocus===key?(dimension.toleranceLabel||dimensionLabel(dimension)):dimensionLabel(dimension)};

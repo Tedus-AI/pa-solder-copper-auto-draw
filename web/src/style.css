@@ -133,3 +133,27 @@
   .controls .dimension-row input{height:21px;min-height:21px;padding-top:1px;padding-bottom:1px}
   .linked-controls{padding-bottom:3px;gap:3px}.group-hint{padding-bottom:3px}.gap-analysis{margin-bottom:3px;padding-top:3px;padding-bottom:3px}
 }
+
+/* Projects and the unified copper part share a compact workbench. */
+.project-fields{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;padding:5px 9px;border-bottom:1px solid #eef1eb;flex:none}
+.project-fields label{display:flex;gap:6px;align-items:center;min-width:0;font-size:10px;color:#657b60;white-space:nowrap}.project-fields input{flex:1;min-width:0;height:25px;font-size:12px;padding:3px 5px}
+.project-toolbar{display:flex;gap:4px;align-items:center;padding:3px 8px;border-bottom:1px solid #e8eee3;flex:none;min-height:28px}
+.project-toolbar select{flex:1;min-width:0;height:23px;border:1px solid #dce5d6;border-radius:3px;background:#fff;color:#4a6748;font-size:10px;padding:2px 4px}
+.project-toolbar button{height:23px;border:1px solid #d6e1cd;border-radius:3px;background:#f7faf3;color:#4c6944;font-size:10px;padding:2px 6px;white-space:nowrap}
+#project-save-status{display:block;max-width:125px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px;color:#74896b;line-height:16px}#project-save-status.save-error{color:#a74324;font-weight:600;max-width:160px}
+#fields{display:flex;flex-direction:column;align-content:normal}.control-region{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:5px;align-items:start;flex:none;min-width:0}.control-region .control-column{gap:4px}
+.integrated-copper{flex:none}.copper-sections{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);min-width:0}.copper-subgroup{min-width:0}.copper-subgroup+ .copper-subgroup{border-left:1px solid #e5ebe1}.copper-subgroup h3{font-size:10px;line-height:14px;font-weight:600;color:#4e6d47;margin:0;padding:3px 6px 0}.copper-subgroup .group-hint{margin:0}.copper-subgroup .linked-controls{padding-top:0}
+.view-tools #view-orthographic.active,.view-tools #view-orthographic[aria-pressed=true],.view-tools #view-iso.active,.view-tools #view-iso[aria-pressed=true]{background:#e9f1e5;color:#3e6744;font-weight:650}
+@media(min-width:981px){
+ .project-fields{padding:4px 8px;gap:8px}.project-fields input{height:23px;font-size:12px}.project-toolbar{min-height:26px;padding-top:2px;padding-bottom:2px}.project-toolbar select,.project-toolbar button{height:22px}
+ #fields{gap:5px}.control-region .control-column{width:100%}.lower-controls{align-items:stretch}.lower-controls .control-group{height:100%}.copper-sections{column-gap:0}.copper-subgroup h3{font-size:10px;padding-top:2px;line-height:13px}
+}
+@media(min-width:981px) and (max-height:950px){
+ .project-fields{padding-top:3px;padding-bottom:3px}.project-fields input{height:22px}.project-toolbar{min-height:24px}.project-toolbar button,.project-toolbar select{height:21px}
+ #fields{gap:4px}.control-region{gap:5px}.control-group summary{height:21px;padding-top:2px;padding-bottom:2px}.dimension-row{height:22px;min-height:22px}.controls .dimension-row input{height:21px;min-height:21px}.tolerance-grid,.field-grid{padding-top:1px;padding-bottom:2px}.dimension-head{height:14px;line-height:13px}.group-hint{padding-bottom:2px;line-height:12px}.linked-controls{padding-bottom:2px}.linked-controls p{line-height:12px}.gap-analysis{padding-top:2px;padding-bottom:2px;margin-bottom:2px}.gap-analysis p{line-height:11px}.gap-analysis th,.gap-analysis td{line-height:14px}.copper-subgroup h3{padding-top:1px;line-height:12px}.control-region .control-column{gap:4px}
+}
+@media(max-width:700px){
+ .project-fields{gap:7px;padding:7px 9px}.project-fields label{display:block;font-size:10px}.project-fields label>span{display:block;margin-bottom:3px}.project-fields input{width:100%;height:29px}.project-toolbar{flex-wrap:wrap;padding:5px 8px;gap:4px}.project-toolbar select{flex-basis:155px;height:27px}.project-toolbar button{height:27px;font-size:10px}#project-save-status{max-width:none;flex-basis:100%}
+ #fields{gap:6px}.control-region,.control-region .control-column{display:contents}.control-group[data-group=package]{order:0}.control-group[data-group=pcb]{order:1}.integrated-copper{order:2}.control-group[data-group=stack]{order:3}.control-group[data-group=preform]{order:4}.control-group[data-group=layout]{order:5}
+ .copper-sections{grid-template-columns:minmax(0,1fr)}.copper-subgroup+ .copper-subgroup{border-left:0;border-top:1px solid #e5ebe1}.copper-subgroup h3{font-size:11px;line-height:16px;padding:5px 8px 0}.lower-controls .control-group{height:auto}
+}

@@ -20,7 +20,7 @@
 | `BASE_L` / `BASE_W` / `BASE_T` | 銅塊外形 E/F/G |
 | `BASE_R` | 四角半徑 |
 | `HOLE_D` / `HOLE_EDGE` | 對角孔直徑及距相鄰兩邊的中心距 |
-| `PA_L` / `PA_W` / `SPH` | PA 名義長／寬及支撐高度 |
+| `PA_L` / `PA_W` / `SPH` | PA 設計長／寬（Typ.）及支撐高度 |
 | `PCB_L` / `PCB_W` / `PCB_T` | PCB 開孔及板厚 |
 | `RELIEF_D` | 體積公式中的 relief 直徑 |
 | `LEAD_SOLDER` / `BOARD_SOLDER` | 高度堆疊 A/B |

@@ -5,6 +5,34 @@ export const overlaps=(a,b,gap=0)=>a.left<b.right+gap&&a.right>b.left-gap&&a.top
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 const rect=(x,y,w,h)=>({left:x-w/2,right:x+w/2,top:y-h/2,bottom:y+h/2});
 
+// A radius is called out from the outside of its arc. Its underline follows
+// the projected radial direction; no line to the hidden construction centre
+// is drawn through the part. Keep the rotated label's full bounding box clear.
+export function radiusAnnotationLayout({a,b,bounds,width,height,labelWidth=120,labelHeight=32,obstacles=[]}) {
+  const dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy);
+  const empty={a,b,aa:b,bb:b,label:null,orientation:'radial',side:'dock',leader:[],collapsed:length<.05};
+  if(length<.05)return empty;
+  const u=[dx/length,dy/length];
+  let angle=Math.atan2(u[1],u[0])*180/Math.PI;
+  if(angle>90)angle-=180;if(angle< -90)angle+=180;
+  const radians=angle*Math.PI/180,cs=Math.cos(radians),sn=Math.sin(radians),normal=[-sn,cs];
+  const halfWidth=(Math.abs(cs)*labelWidth+Math.abs(sn)*labelHeight)/2;
+  const halfHeight=(Math.abs(sn)*labelWidth+Math.abs(cs)*labelHeight)/2;
+  const valid=box=>box.left>=9&&box.right<=width-9&&box.top>=9&&box.bottom<=height-24&&
+    !overlaps(box,bounds,8)&&!obstacles.some(o=>overlaps(box,o,5));
+  for(const gap of[10,16,22,28,36,44,54,66,82])for(const offset of[-9,9]){
+    const cx=b[0]+u[0]*(gap+labelWidth/2)+normal[0]*offset;
+    const cy=b[1]+u[1]*(gap+labelWidth/2)+normal[1]*offset;
+    const label={left:cx-halfWidth,right:cx+halfWidth,top:cy-halfHeight,bottom:cy+halfHeight};
+    if(!valid(label))continue;
+    const end=[b[0]+u[0]*(gap+labelWidth),b[1]+u[1]*(gap+labelWidth)];
+    const side=Math.abs(u[0])>=Math.abs(u[1])?(u[0]>0?'right':'left'):(u[1]>0?'bottom':'top');
+    return{a,b,aa:end,bb:b,label,orientation:'radial',side,leader:[b,end],collapsed:false,
+      textTransform:{x:cx,y:cy,angle},labelLocal:{left:-labelWidth/2,top:-labelHeight/2,width:labelWidth,height:labelHeight}};
+  }
+  return empty;
+}
+
 // A feature leader first follows the true radial/diametral direction, then
 // takes the shorter route around the part to its outside value. It must not
 // turn back through the part just to reach a label below the drawing.
@@ -30,6 +58,7 @@ export function featureLeader(a,b,bounds,label,side) {
 }
 
 export function annotationLayout({a,b,bounds,width,height,labelWidth=120,labelHeight=30,obstacles=[],kind='linear'}) {
+  if(kind==='radius')return radiusAnnotationLayout({a,b,bounds,width,height,labelWidth,labelHeight,obstacles});
   const vertical=Math.abs(b[1]-a[1])>Math.abs(b[0]-a[0]);
   const orientation=vertical?'vertical':'horizontal',gap=22,margin=9;
   const valid=box=>box.left>=margin&&box.right<=width-margin&&box.top>=margin&&box.bottom<=height-24&&

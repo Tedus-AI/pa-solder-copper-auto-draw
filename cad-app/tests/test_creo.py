@@ -1,6 +1,6 @@
 """Protocol/contract simulation only. These tests do NOT validate real PRT files."""
 from copy import deepcopy
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import io
 import json
 import math
@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from pa_cad.creo import Creoson, CreoError, FEATURES, generate, main, prepare_job, validate_job, native_copper_volume
-from pa_cad.design import Design, calculate
+from pa_cad.design import Design, Project, calculate
 from pa_cad.solid import expected_copper_volume
 
 
@@ -19,6 +19,18 @@ def job():
     r = calculate(d)
     return prepare_job(d.to_mapping(), asdict(r), {"copper": expected_copper_volume(d, r),
                                                 "preform": r.preform_area*r.model_thickness})
+
+
+def test_project_metadata_is_preserved_without_driving_native_geometry(job):
+    d = Design.from_mapping(job["design"])
+    d = replace(d, project=Project("基地台 PA 專案 / A", "H-37248KC-6/2"))
+    r = calculate(d)
+    updated = prepare_job(d.to_mapping(), asdict(r),
+                          {part: job["expected"][part]["volume"] for part in ("copper", "preform")})
+    assert updated["design"]["project"] == {"name": "基地台 PA 專案 / A", "pa_model": "H-37248KC-6/2"}
+    assert updated["native_parameters"] == job["native_parameters"]
+    assert updated["name"] == job["name"]
+    validate_job(updated)
 
 
 class ProtocolSimulator:

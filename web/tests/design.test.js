@@ -25,6 +25,14 @@ test('name and unknown settings rejected', () => {
   assert.throws(() => calculate({ ...defaults, name: '../../bad' }));
   assert.throws(() => calculate({ ...defaults, surprise: true }));
 });
+test('project metadata preserves human names independently of native CAD names',()=>{
+  const d=structuredClone(defaults);d.project={name:'  基地台 PA 專案 A  ',pa_model:' PA型號/780 M1P '};
+  const r=calculate(d);assert.deepEqual(r.design.project,{name:'基地台 PA 專案 A',pa_model:'PA型號/780 M1P'});
+  assert.equal(r.design.name,'pa_780_m1p');assert.deepEqual(nativeJob(r).design.project,r.design.project);
+  const old=structuredClone(defaults);delete old.project;assert.deepEqual(calculate(old).design.project,defaults.project);
+  for(const project of [null,[],{name:''},{name:null},{pa_model:1},{name:'a\nb'},{name:'a'.repeat(101)},{surprise:true}])assert.throws(()=>calculate({...defaults,project}),/專案|型號/);
+  assert.equal(calculate({...defaults,project:{name:'測試',pa_model:''}}).design.project.pa_model,'');
+});
 
 test('PDF p8 automatic PA to PCB chain, Delta and Ampleon',()=>{
   const d=structuredClone(defaults),r=calculate(d);

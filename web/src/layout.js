@@ -58,14 +58,16 @@ export function layoutGeometry(r) {
   // annulus around each real mounting hole, as illustrated on slide 9.
   if(!pads.length)throw new Error('目前尺寸未留下可用 E-PAD，請檢查基座、開孔與格距。');
   const mask=clipping.difference(outer,cutout,...holes,pads);
-  const board=clipping.difference(rectangle(0,0,c.base_length+10,c.base_width+10),cutout,...holes);
+  // Copper mounting holes belong to the copper part, not to the PCB. The
+  // reference board only has its PA window and four side relief semicircles.
+  const board=clipping.difference(rectangle(0,0,c.base_length+10,c.base_width+10),cutout);
   const marginX=c.base_length/2-Math.max(...pads.flatMap(p=>p[0].map(v=>Math.abs(v[0]))));
   const marginY=c.base_width/2-Math.max(...pads.flatMap(p=>p[0].map(v=>Math.abs(v[1]))));
   return {copper,copperProfile:footprint.profile,copperFootprint:footprint,outer,cutout,clearances,holes,centers,pads,cells,mask,board,pitch,origin:[cx,cy],
     chord_tolerance:CHORD_TOLERANCE,epad_area:area(pads),mask_area:area(mask),
     boundary_margins:[marginX,marginY],
     notes:[
-      'PPT p9: R=outer green-mask band, S=nominal square E-PAD, T=green web, U=PCB cutout, V=E-PAD exclusion diameter.',
+      'PPT p9: R=outer green-mask band, S=Typ. square E-PAD, T=green web, U=PCB cutout, V=E-PAD exclusion diameter.',
       'Grid centers follow the PCB opening/main-boss center; edge/corner windows are clipped to the true copper profile, including hole breakouts. A boundary falling in a web may leave an edge web; Layout must confirm edge treatment.',
       'Green mask retains the annulus between actual mounting hole D and E-PAD exclusion V. Layer polarity is explicit in the DXF.',
       'PCB relief outline follows p7/p9 side semicircles; solder volume retains the p12 effective pi*r² formula.',

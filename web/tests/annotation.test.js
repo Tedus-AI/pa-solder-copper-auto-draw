@@ -35,3 +35,21 @@ test('radius and diameter leaders follow the feature direction and then avoid th
     }
   }
 });
+
+test('external radius uses one straight radial leader and keeps its rotated label outside',()=>{
+  const bounds={left:300,right:740,top:300,bottom:560};
+  for(const [a,b]of [[[710,330],[730,310]],[[330,330],[310,310]],[[710,530],[730,550]],[[330,530],[310,550]]]){
+    const result=annotationLayout({a,b,bounds,width:1100,height:900,labelWidth:140,labelHeight:30,kind:'radius'});
+    assert.ok(result.label);assert.equal(overlaps(result.label,bounds,8),false);
+    assert.equal(result.leader.length,2);assert.deepEqual(result.leader[0],b);
+    const end=result.leader[1],u=b.map((v,i)=>v-a[i]),v=end.map((p,i)=>p-b[i]);
+    assert.ok(Math.abs(u[0]*v[1]-u[1]*v[0])<1e-8);
+    assert.ok(u[0]*v[0]+u[1]*v[1]>0,'Leader must extend away from the construction center');
+    assert.equal(Math.abs(result.textTransform.angle),45);
+    const {x,y,angle}=result.textTransform,r=angle*Math.PI/180;
+    for(const px of[-70,70])for(const py of[-15,15]){
+      const sx=x+px*Math.cos(r)-py*Math.sin(r),sy=y+px*Math.sin(r)+py*Math.cos(r);
+      assert.ok(sx>=result.label.left-1e-8&&sx<=result.label.right+1e-8&&sy>=result.label.top-1e-8&&sy<=result.label.bottom+1e-8);
+    }
+  }
+});

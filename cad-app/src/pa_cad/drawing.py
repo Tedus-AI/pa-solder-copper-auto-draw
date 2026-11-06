@@ -104,11 +104,20 @@ def _round_feature_dimensions(msp, d, x, y, hx, hy):
         if any(math.hypot(point[0]-px, point[1]-py) <= hole_radius+1e-6
                for px, py in [(-hx, -hy), (hx, hy)]):
             continue
-        msp.add_radius_dim(center=center, radius=c.corner_radius,
-                           location=(sx*(x+4), sy*(y+4)),
-                           text=_feature_text(d, "copper.corner_radius", "R",
-                                              c.corner_radius, 4),
-                           override=style, dxfattribs={"layer": "DIM"}).render()
+        # Only the outside radial leader is visible. The center is retained
+        # in the native DIMENSION definition, without a center-to-arc line.
+        radial_style = {**style, "dimtofl": 0, "dimtoh": 0, "dimtih": 0}
+        radius = msp.add_radius_dim(center=center, radius=c.corner_radius,
+                                    location=(sx*(x+4), sy*(y+4)),
+                                    text=_feature_text(d, "copper.corner_radius", "R",
+                                                       c.corner_radius, 4),
+                                    override=radial_style, dxfattribs={"layer": "DIM"})
+        radius.render()
+        # DEFPOINTS are not needed in the rendered block: the actual radius
+        # definition remains on DIMENSION, and no center marker is plotted.
+        block = radius.dimension.get_geometry_block()
+        for entity in list(block.query("POINT")):
+            block.delete_entity(entity)
         break
 
 
@@ -176,7 +185,7 @@ def write_copper(d: Design, r: Result, path: Path):
     _text(msp, "RIGHT (1:1)", side_x-c.base_width/2, baseline-3)
     notes_x = x+20
     notes = [
-        f"{d.name} / COPPER BLOCK / mm / nominal geometry",
+        f"{d.name} / COPPER BLOCK / mm / design dimensions (Typ.)",
         f"E = {c.base_length:g}{_tol(d,'copper.base_length')} mm; F = {c.base_width:g}{_tol(d,'copper.base_width')} mm",
         f"G = {c.base_thickness:g}{_tol(d,'copper.base_thickness')} mm; "+_feature_text(d,"copper.corner_radius","R",c.corner_radius,4),
         _feature_text(d,"copper.hole_diameter","D",c.hole_diameter,2,"%%c")+f" THRU; C = {c.hole_edge_offset:g}{_tol(d,'copper.hole_edge_offset')} mm",
@@ -208,7 +217,7 @@ def write_preform(d: Design, r: Result, path: Path):
     _dim(msp, (x,baseline), (x,baseline+r.model_thickness), (x+4,baseline),
          90, "Z = <>"+_tol(d,"preform.thickness_override")+" mm")
     _text(msp, "FRONT (1:1)", -x, baseline-3)
-    notes = [f"{d.name} / SOLDER PREFORM / mm / nominal geometry",
+    notes = [f"{d.name} / SOLDER PREFORM / mm / design dimensions (Typ.)",
              f"W = {r.boss_length:g}{_tol(d,'preform.length')} mm; X = {r.boss_width:g}{_tol(d,'preform.width')} mm",
              f"4X 45 deg chamfer: Y = {d.preform.chamfer:g}{_tol(d,'preform.chamfer')} mm",
              f"Z = {r.model_thickness:.6f}{_tol(d,'preform.thickness_override')} mm",

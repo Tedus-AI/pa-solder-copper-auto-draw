@@ -70,10 +70,15 @@ export function drawing(r, part) {
     });
     const corner=candidates.find(({tip})=>footprint.centers.every(([hx,hy])=>Math.hypot(tip[0]-hx,tip[1]-hy)>c.hole_diameter/2+1e-7));
     if(corner){
-      const{sx,sy,center,direction,tip}=corner,knee=[sx*(x+3),sy*(y+3)],shelf=Math.max(8,radiusLabel.replaceAll('%%p','±').length*.48);
-      line(center,tip);line(tip,knee);line(knee,[knee[0]+sx*shelf,knee[1]]);arrow(tip,direction);
-      centerMark(center,.45,.1);
-      text(radiusLabel,knee[0]+(sx<0?-shelf:.2),knee[1]+.7,.85,'DIM');
+      // The arrow touches the arc from outside. The slanted value follows the
+      // same straight leader; no line or centre mark is drawn inside the part.
+      const{direction,tip}=corner,length=Math.max(8,radiusLabel.replaceAll('%%p','±').length*.48);
+      const start=tip.map((v,i)=>v+direction[i]*3.5),end=start.map((v,i)=>v+direction[i]*(length+.5));
+      line(tip,end);arrow(tip,direction);
+      let angle=Math.atan2(direction[1],direction[0])*180/Math.PI,anchor=start;
+      if(angle>90||angle< -90){angle+=angle>90?-180:180;anchor=end;}
+      const radians=angle*Math.PI/180,normal=[-Math.sin(radians),Math.cos(radians)];
+      text(radiusLabel,anchor[0]+normal[0]*.65,anchor[1]+normal[1]*.65,.85,'DIM',angle);
     }
     for(const center of footprint.centers)centerMark(center,c.hole_diameter/2);
     // A horizontal diametral line through the nearby upper hole avoids the

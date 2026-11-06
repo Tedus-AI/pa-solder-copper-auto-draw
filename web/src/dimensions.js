@@ -7,7 +7,7 @@ export function dimensionFor(key,r,layout){
  const d=r.design,c=d.copper,p=d.package,b=d.pcb,l=d.layout,z=referenceLevels(r),I=r.boss_length,H=r.boss_width,[cx,cy]=r.boss_center||[0,0];
  const hx=c.base_length/2-c.hole_edge_offset,hy=c.base_width/2-c.hole_edge_offset,padX=(I-c.pad_size)/2,padY=(H-c.pad_size)/2;
  const pinX=4.445*p.length/20.57,pinY=-Math.min(p.width/2+4.83*p.width/9.78-.2,Math.max(p.width/2+.5,b.opening_width/2+.5));
- const radiusCandidates=[[1,1],[1,-1],[-1,1],[-1,-1]].map(([sx,sy])=>{const a=[sx*(c.base_length/2-c.corner_radius),sy*(c.base_width/2-c.corner_radius),z.base];return{a,b:[a[0]+sx*c.corner_radius/Math.SQRT2,a[1]+sy*c.corner_radius/Math.SQRT2,z.base]};});
+ const radiusCandidates=[[1,1],[1,-1],[-1,1],[-1,-1]].flatMap(([sx,sy])=>[45,30,60,15,75].map(degrees=>{const a=[sx*(c.base_length/2-c.corner_radius),sy*(c.base_width/2-c.corner_radius),z.base],angle=degrees*Math.PI/180;return{a,b:[a[0]+sx*c.corner_radius*Math.cos(angle),a[1]+sy*c.corner_radius*Math.sin(angle),z.base]};}));
  const visibleRadiusCandidates=radiusCandidates.filter(candidate=>[-1,1].every(sign=>Math.hypot(candidate.b[0]-sign*hx,candidate.b[1]-sign*hy)>c.hole_diameter/2+1e-6));
  const radiusDatum=visibleRadiusCandidates[0]||radiusCandidates[0];
  const candidates=layout?.cells.filter(cell=>cell.full)||[],cell=candidates.find(cell=>candidates.some(other=>Math.abs(other.y-cell.y)<1e-6&&Math.abs(other.x-cell.x-layout.pitch)<1e-6))||candidates[0]||{x:cx,y:cy+b.opening_width/2+2};
@@ -23,11 +23,11 @@ export function dimensionFor(key,r,layout){
  'copper.base_length':()=>v([-c.base_length/2,-c.base_width/2,z.base],[c.base_length/2,-c.base_width/2,z.base],'copper',c.base_length,'基座長度 E'),
  'copper.base_width':()=>v([-c.base_length/2,-c.base_width/2,z.base],[-c.base_length/2,c.base_width/2,z.base],'copper',c.base_width,'基座寬度 F'),
  'copper.base_thickness':()=>v([c.base_length/2,0,0],[c.base_length/2,0,z.base],'copper',c.base_thickness,'基座厚度 G'),
- 'copper.corner_radius':()=>v(radiusDatum.a,radiusDatum.b,'copper',c.corner_radius,'圓角半徑 R：取未被孔切除的角部，以徑向單箭頭就近引出'),
+ 'copper.corner_radius':()=>v(radiusDatum.a,radiusDatum.b,'copper',c.corner_radius,'圓角半徑 R：外側單箭頭指向有效圓弧，尺寸文字沿斜引線標示'),
  'copper.hole_diameter':()=>v([hx-c.hole_diameter/2,hy,z.base],[hx+c.hole_diameter/2,hy,z.base],'copper',c.hole_diameter,'吊掛孔徑 D；孔徑大於角部肉厚時顯示實際破邊'),
  'copper.hole_edge_offset':()=>v([hx,hy,z.base],[c.base_length/2,hy,z.base],'copper',c.hole_edge_offset,'孔中心至基座直邊基準 C，與圓角 R 獨立'),
  'copper.pad_size':()=>v([padX-c.pad_size/2,padY-c.pad_size/2,z.pad],[padX+c.pad_size/2,padY-c.pad_size/2,z.pad],'copper',c.pad_size,'四角小凸台邊長 J'),
- 'boss.length':()=>v([-I/2,-H/2,z.boss],[I/2,-H/2,z.boss],'copper',I,'中凸台長度 I；自動時依 PA 名義長度向上取至 0.1 mm'),
+ 'boss.length':()=>v([-I/2,-H/2,z.boss],[I/2,-H/2,z.boss],'copper',I,'中凸台長度 I；自動時依 PA 設計長度（Typ.）向上取至 0.1 mm'),
  'boss.width':()=>v([I/2,-H/2,z.boss],[I/2,H/2,z.boss],'copper',H,'中凸台寬度 H'),
  'boss.total_height':()=>v([padX,padY,z.base],[padX,padY,z.pad],'copper',r.boss_total_height,'L 包含 K；中凸台本體高度 = L − K'),
  'boss.center_from_left':()=>v([-c.base_length/2,cy,z.base],[cx,cy,z.base],'copper',d.boss.center_from_left,'左側基準邊至中凸台中心 Xc'),
@@ -36,8 +36,8 @@ export function dimensionFor(key,r,layout){
  'stack.board_solder':()=>v([c.base_length/2-2,0,z.base],[c.base_length/2-2,0,z.pcbBottom],'assembly',d.stack.board_solder,'基座頂面與 PCB 底面間錫厚 B'),
  'stack.flange_gap':()=>v([pinX,-p.width/2,z.boss],[pinX,-p.width/2,z.flange],'assembly',d.stack.flange_gap,'中凸台平面到 PA 金屬底座底面 D'),
  'stack.pad_height':()=>v([padX,padY,z.boss],[padX,padY,z.pad],'copper',d.stack.pad_height,'小凸台高度 K；中凸台本體高度 = L − K'),
- 'preform.length':()=>v([-I/2,-H/2,0],[I/2,-H/2,0],'preform',I,'錫片名義長度 W = 中凸台 I；製造公差獨立'),
- 'preform.width':()=>v([I/2,-H/2,0],[I/2,H/2,0],'preform',H,'錫片名義寬度 X = 中凸台 H；製造公差獨立'),
+ 'preform.length':()=>v([-I/2,-H/2,0],[I/2,-H/2,0],'preform',I,'錫片設計長度（Typ.）W = 中凸台 I；製造公差獨立'),
+ 'preform.width':()=>v([I/2,-H/2,0],[I/2,H/2,0],'preform',H,'錫片設計寬度（Typ.）X = 中凸台 H；製造公差獨立'),
  'preform.chamfer':()=>v([-I/2,-H/2,0],[-I/2+d.preform.chamfer,-H/2,0],'preform',d.preform.chamfer,'45° 削角的直角邊長 Y'),
  'preform.trial_delta':()=>v([0,0,r.calculated_thickness],[0,0,r.calculated_thickness+d.preform.trial_delta],'preform',d.preform.trial_delta,'試片增減量，非 Z 製造公差'),
  'preform.thickness_override':()=>v([I/2,0,0],[I/2,0,r.model_thickness],'preform',r.model_thickness,d.preform.thickness_override===null?'自動採體積計算錫厚 Z':'指定錫厚 Z'),
