@@ -141,12 +141,32 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'copper.base_thickness');
     assert.equal(await page.locator('#viewer').getAttribute('data-pulse'),'breathing');
     assert.match(await page.locator('#dimension-title').textContent(),/G = 3 \+0\/−0\.1 mm/);
-    const frame1=await page.locator('#viewer').screenshot();
+    // Wait for the earlier orbit drag to settle, then sample known animation
+    // phases. A slow software renderer can otherwise capture the same phase
+    // twice, even though the visible halo is correctly breathing.
+    await page.waitForFunction(()=>{
+      const halo=document.querySelector('.dimension-halo');if(!halo)return false;
+      const prior=window.__cadPulseStable;
+      if(prior?.halo!==halo){window.__cadPulseStable={halo,frames:0};return false;}
+      return ++prior.frames>=3;
+    },null,{timeout:60000});
+    const pulse=page.locator('.dimension-markers');
+    const animations=await pulse.evaluate(el=>el.getAnimations({subtree:true}).map(a=>({state:a.playState,duration:Number(a.effect.getComputedTiming().duration)})));
+    assert.ok(animations.length>0&&animations.every(a=>a.state==='running'&&a.duration>0),'Viewer halos must start animating automatically');
+    const pulsePhase=async fraction=>pulse.evaluate(async(el,f)=>{
+      const active=el.getAnimations({subtree:true});
+      await Promise.all(active.map(a=>{a.pause();return a.ready;}));
+      active.forEach(a=>a.currentTime=Number(a.effect.getComputedTiming().duration)*f);
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    },fraction);
+    await pulsePhase(0);
+    const frame1=await pulse.screenshot();
     const fixedText1=await page.locator('.dimension-value').screenshot();
-    await new Promise(r=>setTimeout(r,250));
-    const frame2=await page.locator('#viewer').screenshot();
+    await pulsePhase(.5);
+    const frame2=await pulse.screenshot();
     assert.notDeepEqual(frame1,frame2,'The real viewer highlight must animate');
     assert.deepEqual(await page.locator('.dimension-value').screenshot(),fixedText1,'Dimension text must not fade or pulse');
+    await pulse.evaluate(el=>{el.getAnimations({subtree:true}).forEach(a=>a.play());delete window.__cadPulseStable;});
     const textStyle=await page.locator('.dimension-number').evaluate(el=>({fill:getComputedStyle(el).fill,opacity:getComputedStyle(el).opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}));
     assert.deepEqual(textStyle,{fill:'rgb(96, 41, 15)',opacity:'1',parentOpacity:'1'});
     await page.locator('#pcb-opening_length').focus();
