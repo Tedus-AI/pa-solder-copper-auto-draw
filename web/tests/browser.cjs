@@ -65,6 +65,21 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.match(await formula('gap-x-min'),/20\.697/);assert.match(await page.locator('#formula-tooltip').textContent(),/0\.0515/);
     assert.match(await formula('metric-z'),/Z = \(V/);await page.keyboard.press('Escape');
     assert.equal(await page.locator('#download-zip').isDisabled(),false,'Reading a formula cannot invalidate CAD output');
+    assert.match(await formula('hsk-depth'),/對應銅塊的位置加工凹槽/);
+    assert.match(await page.locator('#formula-tooltip').textContent(),/3～3.1 mm/);await page.keyboard.press('Escape');
+    await page.locator('.formula-help[data-formula-id="metric-z"]').click();
+    assert.equal(await page.locator('#calculation-guide').isVisible(),true);
+    assert.match(await page.locator('.guide-summary').textContent(),/0.374779/);
+    await page.locator('#calculation-guide').screenshot({path:path.join(output,'thickness-diagram.png')});
+    await page.locator('[data-guide-layer="cavity"]').click();
+    assert.equal(await page.locator('.guide-cavity').evaluate(e=>getComputedStyle(e).opacity),'1');
+    assert.equal(await page.locator('.guide-solder').evaluate(e=>getComputedStyle(e).opacity),'0');
+    await page.locator('#guide-table-tab').click();
+    assert.equal(await page.locator('#guide-table-pane').isVisible(),true);
+    assert.equal(await page.locator('.guide-table tbody tr').count(),18);
+    await page.locator('#calculation-guide').screenshot({path:path.join(output,'thickness-worksheet.png')});
+    await page.locator('#calculation-guide-close').click();
+
     await page.locator('#tol-package-length-plus').focus();
     assert.equal(JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind,'envelope');
     assert.equal(await page.locator('.dimension-arrow').count(),0,'PA tolerance shows max outline and a label, not a +/- segment');
@@ -74,6 +89,11 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.locator('#pcb-thickness').fill('2.1');
     await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.61);
     assert.match(await formula('boss.total_height'),/0\.61/);await page.keyboard.press('Escape');
+    await page.locator('#calculation-guide-open').click();await page.locator('#guide-table-tab').click();
+    const hRow=page.locator('.guide-table tbody tr').filter({hasText:'Cu to flange 高度'});
+    assert.equal(await hRow.locator('td').first().textContent(),'0.73');
+    await page.locator('#calculation-guide-close').click();
+
     await page.locator('#reset').click();await modelReady();
     const annotationOutput=path.join(output,'dimensions');fs.mkdirSync(annotationOutput,{recursive:true});
     const inputNames=await page.locator('#fields .nominal-input').evaluateAll(inputs=>inputs.map(input=>input.name));
@@ -166,11 +186,23 @@ const { unzipSync, strFromU8 } = require('fflate');
     },fraction);
     await pulsePhase(0);
     const frame1=await pulse.screenshot();
-    const fixedText1=await page.locator('.dimension-value').screenshot();
+    // The unboxed label has a transparent background: a screenshot also
+    // captures the WebGL grid behind it. Verify the actual text and ancestor
+    // presentation independently of GPU background rasterization.
+    const textPresentation=()=>page.locator('.dimension-number').evaluate(el=>{
+      const chain=[];for(let node=el;node;node=node.parentElement){const s=getComputedStyle(node);chain.push({opacity:s.opacity,filter:s.filter,animations:node.getAnimations({subtree:false}).length});}
+      const s=getComputedStyle(el);return{text:el.textContent,fill:s.fill,fillOpacity:s.fillOpacity,chain};
+    });
+    const fixedText1=await textPresentation();
+    const haloOpacity1=await page.locator('.dimension-halo').first().evaluate(e=>Number(getComputedStyle(e).opacity));
     await pulsePhase(.5);
     const frame2=await pulse.screenshot();
     assert.notDeepEqual(frame1,frame2,'The real viewer highlight must animate');
-    assert.deepEqual(await page.locator('.dimension-value').screenshot(),fixedText1,'Dimension text must not fade or pulse');
+    const haloOpacity2=await page.locator('.dimension-halo').first().evaluate(e=>Number(getComputedStyle(e).opacity));
+    assert.ok(haloOpacity2-haloOpacity1>.5,'Actual halo opacity must change at the two sampled phases');
+    assert.deepEqual(await textPresentation(),fixedText1,'Dimension text must not fade or pulse');
+    assert.equal(fixedText1.fillOpacity,'1');
+    assert.ok(fixedText1.chain.every(s=>s.opacity==='1'&&s.filter==='none'&&s.animations===0),'Text ancestors must not animate, fade or filter the value');
     await pulse.evaluate(el=>{el.getAnimations({subtree:true}).forEach(a=>a.play());delete window.__cadPulseStable;});
     const textStyle=await page.locator('.dimension-number').evaluate(el=>({fill:getComputedStyle(el).fill,opacity:getComputedStyle(el).opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}));
     assert.deepEqual(textStyle,{fill:'rgb(96, 41, 15)',opacity:'1',parentOpacity:'1'});
@@ -345,6 +377,10 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.ok(await page.locator('#formula-tooltip').evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;}));await page.keyboard.press('Escape');
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
     // Review sheets accompany the full-size screenshots in the CI artifact.
+    await page.locator('#calculation-guide-open').click();
+    assert.equal(await page.locator('#calculation-guide').isVisible(),true);
+    assert.ok(await page.locator('#calculation-guide').evaluate(e=>e.scrollWidth<=e.clientWidth+1),'Guide must fit mobile width');
+    await page.locator('#calculation-guide-close').click();
     const review=await browser.newPage({viewport:{width:1480,height:900},deviceScaleFactor:1});
     for(let i=0;i<annotationNames.length;i+=7){
       const tiles=annotationNames.slice(i,i+7).map(key=>`<article><h2>${key}</h2><img src="data:image/png;base64,${fs.readFileSync(path.join(annotationOutput,`${key.replace('.','-')}.png`)).toString('base64')}"></article>`).join('');

@@ -9,6 +9,7 @@ import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { CADViewer } from './viewer.js';
 import { BrowserProjectStore } from './project-store.js';
+import { createCalculationGuide } from './calculation-guide.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
@@ -16,6 +17,9 @@ let layoutKey='', cachedLayout=null, tolerancesUnlocked=false;
 const projectStore=new BrowserProjectStore();let activeProjectId=null,rebuildQueued=false,projectMetadataValid=true;
 const downloadButtons=['download-zip','download-dxf','download-step'];
 const formulaButtons=new Map();let activeFormulaButton=null;
+const calculationIds=new Set(['metric-z','metric-model','metric-volume','v-cavity','v-boss','v-area','trials']);
+const openCalculationGuide=createCalculationGuide(()=>calculate(syncLinkedFields(formValues())));
+function showCalculationGuide(){try{hideFormula();openCalculationGuide();}catch(e){error(e.message);}}
 const formulaTooltip=document.createElement('div');formulaTooltip.id='formula-tooltip';formulaTooltip.setAttribute('role','tooltip');formulaTooltip.hidden=true;document.body.append(formulaTooltip);
 function hideFormula(){formulaTooltip.hidden=true;if(activeFormulaButton)activeFormulaButton.setAttribute('aria-expanded','false');activeFormulaButton=null;}
 function showFormula(button){
@@ -31,7 +35,7 @@ function formulaHelp(container,id,label){
   if(!button){
     button=document.createElement('button');button.type='button';button.className='formula-help';button.textContent='?';button.dataset.formulaId=id;button.setAttribute('aria-label',`${label}的計算方式`);button.setAttribute('aria-describedby','formula-tooltip');button.setAttribute('aria-expanded','false');
     button.addEventListener('pointerenter',()=>showFormula(button));button.addEventListener('pointerleave',()=>{if(document.activeElement!==button)hideFormula();});button.addEventListener('focus',()=>showFormula(button));button.addEventListener('blur',hideFormula);
-    button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();showFormula(button);});
+    button.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();if(calculationIds.has(id))showCalculationGuide();else showFormula(button);});
     formulaButtons.set(id,button);
   }
   if(container&&button.parentElement!==container)container.append(button);return button;
@@ -296,6 +300,7 @@ for(const view of ['iso',...faceViews])$(`view-${view}`).addEventListener('click
 $('view-orthographic').addEventListener('click',()=>viewer.setView(viewer.lastOrthographicView||'top'));
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
+$('calculation-guide-open').addEventListener('click',showCalculationGuide);
 $('help-open').addEventListener('click',()=>$('help-dialog').showModal());
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
@@ -306,7 +311,7 @@ function renderMetrics(r){
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
   const maximum=r.pa_envelope?[r.pa_envelope.max_length,r.pa_envelope.max_width]:r.opening_chain.maximum;
   $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append('；');$('package-derived').append(formatDimension(index?'PA(Wmax)':'PA(Lmax)',value));formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
-  $('copper-derived').textContent=formatDimension('HSK 深度',r.heatsink_depth);formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');$('copper-derived').append('；孔位由兩相鄰外邊定位');
+  $('copper-derived').textContent=formatDimension('HSK 槽深',r.heatsink_depth,{tolerance:'±0.05'});formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');$('copper-derived').append('；孔位由兩相鄰外邊定位');
   $('stack-derived').textContent=`L = C + 0.1 + 0.1 − SPH − 0.3 + K = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
   $('boss-derived').textContent=`中凸台下段高 = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(`；中凸台總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
   $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} ${formatDimension('M',r.recommended_opening[0])}；${formatDimension('N',r.recommended_opening[1])}（${r.design.pcb.opening_rule==='delta'?'Delta':'Ampleon'}）`;
@@ -337,13 +342,13 @@ function renderFormulaHelp(r){
   setFormula('boss.center_from_left',`Xc 是從基座左外邊到中凸台中心的手動定位尺寸。\n按「置中」時計算 Xc = E / 2 = ${f(c.base_length)} / 2 = ${f(c.base_length/2)} mm。\n目前 Xc = ${f(d.boss.center_from_left)} mm；相對基座中心偏移 = ${f(r.boss_center[0])} mm。`);
   setFormula('boss.center_from_bottom',`Yc 是從基座下外邊到中凸台中心的手動定位尺寸。\n按「置中」時計算 Yc = F / 2 = ${f(c.base_width)} / 2 = ${f(c.base_width/2)} mm。\n目前 Yc = ${f(d.boss.center_from_bottom)} mm；相對基座中心偏移 = ${f(r.boss_center[1])} mm。`);
   setFormula('boss-lower',`中凸台下段高度 = L − K\n= ${f(r.boss_total_height)} − ${f(s.pad_height)} = ${f(r.boss_lower_height)} mm。`);
-  setFormula('hsk-depth',`HSK 設計深度（Typ.） = G + 0.05\n= ${f(c.base_thickness)} + 0.05 = ${f(r.heatsink_depth)} mm\nPPT 第3頁另指定 HSK 配合深度公差 ±0.05 mm。`);
+  setFormula('hsk-depth',`在 HSK（散熱器）對應銅塊的位置加工凹槽，容納銅塊基座。\n槽深設計值 = 銅塊基座厚度 G + 0.05 mm\n= ${f(c.base_thickness)} + 0.05 = ${f(r.heatsink_depth)} mm。\n此 HSK 槽深的加工公差為 ±0.05 mm；允許深度 ${f(r.heatsink_depth-.05)}～${f(r.heatsink_depth+.05)} mm。\n來源：PDF 第3頁。這是 HSK 凹槽的尺寸，銅塊厚度 G 仍依其本身的公差。`);
   const cavity=`V₁₋₁ = [M × N + π × (O / 2)²] × (L + D − K)\n= [${f(b.opening_length)} × ${f(b.opening_width)} + π × (${f(b.relief_diameter)} / 2)²] × ${f(r.copper_to_flange)} = ${f(r.cavity_volume)} mm³\n依 PPT 第12頁的等效體積公式。`;
   const boss=`V₂ = I × H × (L − K) + 4 × J² × K\n= ${f(r.boss_length)} × ${f(r.boss_width)} × ${f(r.boss_lower_height)} + 4 × ${f(c.pad_size)}² × ${f(s.pad_height)} = ${f(r.boss_volume)} mm³。`;
   const volume=`V₁ = V₁₋₁ − V₂\n= ${f(r.cavity_volume)} − ${f(r.boss_volume)} = ${f(r.solder_volume)} mm³。`;
   const area=`A₁ = W × X − 2 × Y²\n= ${f(t.length)} × ${f(t.width)} − 2 × ${f(t.chamfer)}² = ${f(r.preform_area)} mm²。`;
-  const z=`Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。`;
-  setFormula('v-cavity',cavity);setFormula('v-boss',boss);setFormula('v-area',area);setFormula('metric-volume',volume);setFormula('metric-z',z);setFormula('metric-model',z,t.thickness_override===null);
+  const z=`Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`;
+  setFormula('v-cavity',cavity);setFormula('v-boss',boss);setFormula('v-area',area);setFormula('metric-volume',volume);setFormula('metric-z',z);setFormula('metric-model',t.thickness_override===null?`模型 Z 自動採用計算 Z = ${f(r.calculated_thickness)} mm。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`:`模型 Z 使用指定錫厚 = ${f(r.model_thickness)} mm。\n計算 Z = ${f(r.calculated_thickness)} mm，保留作比較。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`);
   setFormula('trials',`三款試片厚度 = 計算 Z − 增減量、Z、Z + 增減量\n= ${f(r.calculated_thickness)} − ${f(t.trial_delta)}、${f(r.calculated_thickness)}、${f(r.calculated_thickness)} + ${f(t.trial_delta)}\n= ${r.trial_thicknesses.map(f).join(' / ')} mm。`);
   for(const axis of ['x','y']){
     const g=r.gap_analysis[axis],window=g.window,pa=g.pa;
