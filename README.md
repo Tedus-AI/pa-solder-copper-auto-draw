@@ -12,6 +12,8 @@
 
 桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、四種零件顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
 
+目前工作區另包含三層銅色色階、PA最大公差虛線、公差來源與解鎖編輯、PA／PCB單邊間隙極限、真實圓角破邊孔、中凸台Xc/Yc定位，以及各自動值旁的公式問號。L依PPT第6頁固定自動計算，中凸台本體高度為L−K。
+
 5G RRU PA（功率放大器）焊料 / Copper Coin 自動出圖工具。
 
 輸入 PA 封裝與設計參數（YAML），自動計算並輸出：

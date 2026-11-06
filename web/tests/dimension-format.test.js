@@ -12,7 +12,7 @@ test('every numeric field has explicit notation with equals and mm',()=>{
   const r=calculate(defaults),g=layoutGeometry(r);
   for(const key of keys){
     const label=dimensionLabel(dimensionFor(key,r,g));
-    assert.match(label,/^.+ = (?:±|⌀)?[\d.]+ mm$/);assert.ok(!label.startsWith('Δ'));
+    assert.match(label,/^.+ = (?:±|⌀)?[\d.]+(?: (?:±[\d.]+|\+[\d.]+\/−[\d.]+))? mm$/);assert.ok(!label.startsWith('Δ'));
   }
 });
 test('PA, coded, descriptive, diameter and tolerance formats follow the requested convention',()=>{
@@ -21,8 +21,8 @@ test('PA, coded, descriptive, diameter and tolerance formats follow the requeste
     ['package.support_height',1.57,'SPH = 1.57 mm'],['copper.base_length',40,'E = 40 mm'],
     ['copper.corner_radius',3,'R = 3 mm'],['copper.hole_diameter',3,'D = ⌀3 mm'],
     ['pcb.relief_diameter',2,'O = ⌀2 mm'],['layout.hole_clearance',4,'V = ⌀4 mm'],
-    ['package.max_tolerance',.127,'PA 尺寸公差 = ±0.127 mm'],['pcb.placement_accuracy',.066,'貼片放置精度 = ±0.066 mm'],
-    ['pcb.opening_tolerance',.1,'PCB 開窗公差 = ±0.1 mm'],['preform.trial_delta',.05,'試片厚度增減量 = ±0.05 mm'],
+    ['boss.length',20.6,'I = 20.6 mm'],['boss.width',9.8,'H = 9.8 mm'],['boss.total_height',.48,'L = 0.48 mm'],
+    ['boss.center_from_left',20,'Xc = 20 mm'],['preform.length',20.6,'W = 20.6 mm'],['preform.trial_delta',.05,'試片厚度增減量 = ±0.05 mm'],
   ])assert.equal(dimensionLabel({key,value}),expected);
   assert.throws(()=>dimensionLabel({key:'unmapped',value:1}),/Missing dimension/);
   assert.equal(formatDimension('微小公差',.000001), '微小公差 = 0.000001 mm');

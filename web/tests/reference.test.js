@@ -7,10 +7,10 @@ import { calculate, defaults } from '../src/design.js';
 import { referenceLevels, dimensionFor } from '../src/dimensions.js';
 const near=(a,b)=>assert.ok(Math.abs(a-b)<1e-8,`${a} != ${b}`);
 
-test('datasheet PA outline has a flange, chamfered casing, lid and six side pins',()=>{
+test('datasheet PA outline has a flange, chamfered casing and six side pins without an extra lid',()=>{
   const pa=paReference(defaults.package);
   assert.equal(pa.flange.length,20.57);assert.equal(pa.flange.width,9.78);near(pa.flange.depth,1.02);near(pa.totalHeight,3.78);
-  assert.equal(pa.body.profile.length,8);assert.equal(pa.lid.profile.length,8);
+  assert.equal(pa.body.profile.length,8);assert.equal(pa.lid,undefined);
   assert.equal(pa.pins.length,6);assert.equal(pa.pins.filter(p=>p.center[1]>0).length,4);assert.equal(pa.pins.filter(p=>p.center[1]<0).length,2);
   for(const p of pa.pins){near(p.center[2]-p.size[2]/2,1.57);assert.ok(Math.abs(p.center[1])+p.size[1]/2>pa.flange.width/2);}
 });
@@ -41,7 +41,7 @@ test('PA input changes resize the reference without inventing manufacturing inpu
   const p={...defaults.package,length:24,width:12,support_height:1.4,max_tolerance:.2},pa=paReference(p),r=calculate({...defaults,package:p}),z=referenceLevels(r);
   assert.deepEqual(pa.maximum,[24.2,12.2]);assert.equal(pa.flange.length,24);assert.equal(pa.flange.width,12);
   for(const pin of pa.pins)near(z.flange+pin.center[2]-pin.size[2]/2,z.pcbTop+defaults.stack.lead_solder);
-  assert.ok(pa.totalHeight>pa.flange.depth+pa.lid.depth);
+  near(pa.totalHeight,pa.flange.depth+pa.body.depth);
   assert.ok(pa.body.profile.every(([x,y])=>Math.abs(x)<p.length/2&&Math.abs(y)<p.width/2));
   const changedTolerance=paReference({...p,max_tolerance:.4});assert.deepEqual(changedTolerance.pins,pa.pins);assert.deepEqual(changedTolerance.maximum,[24.4,12.4]);
 });

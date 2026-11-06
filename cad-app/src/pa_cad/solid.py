@@ -14,13 +14,17 @@ def copper_block(d: Design, r: Result) -> cq.Workplane:
     holes = (cq.Workplane("XY").pushPoints([(-hx, -hy), (hx, hy)])
              .circle(c.hole_diameter / 2).extrude(c.base_thickness))
     base = base.cut(holes)
+    bx, by = r.boss_center
     boss = (cq.Workplane("XY").workplane(offset=c.base_thickness)
-            .rect(r.boss_length, r.boss_width).extrude(r.boss_lower_height))
+            .center(bx, by).rect(r.boss_length, r.boss_width).extrude(r.boss_lower_height))
     px, py = (r.boss_length - c.pad_size) / 2, (r.boss_width - c.pad_size) / 2
     pads = (cq.Workplane("XY").workplane(offset=c.base_thickness + r.boss_lower_height)
-            .pushPoints([(x, y) for x in (-px, px) for y in (-py, py)])
+            .pushPoints([(bx+x, by+y) for x in (-px, px) for y in (-py, py)])
             .rect(c.pad_size, c.pad_size).extrude(d.stack.pad_height))
-    return base.union(boss).union(pads).clean()
+    result = base.union(boss).union(pads).clean()
+    if len(result.solids().vals()) != 1 or not result.val().isValid():
+        raise ValueError("孔切除造成斷裂或無效銅塊實體，無法作為單一製造零件")
+    return result
 
 
 def solder_preform(d: Design, r: Result) -> cq.Workplane:
@@ -29,8 +33,4 @@ def solder_preform(d: Design, r: Result) -> cq.Workplane:
 
 
 def expected_copper_volume(d: Design, r: Result) -> float:
-    import math
-    c = d.copper
-    area = c.base_length * c.base_width - (4 - math.pi) * c.corner_radius**2
-    area -= 2 * math.pi * (c.hole_diameter / 2)**2
-    return area * c.base_thickness + r.boss_volume
+    return r.copper_base_area * d.copper.base_thickness + r.boss_volume

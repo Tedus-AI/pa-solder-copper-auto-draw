@@ -33,6 +33,7 @@ CREOSON 只需本機存取，不需要將工作站服務公開到網際網路或
 | `BASE_R` | 3，四角圓角半徑 |
 | `HOLE_D` / `HOLE_EDGE` | 3 / 4，吊掛孔直徑、孔中心距兩相鄰外邊 |
 | `BOSS_L` / `BOSS_W` | 20.6 / 9.8，大凸台長寬 |
+| `BOSS_X` / `BOSS_Y` | 新版任務的中凸台中心相對基座中心位移，預設 0 / 0，可為正、負或零；舊版未含此參數的任務仍視為中心對齊 |
 | `CUH` / `PAD_H` | 0.48 / 0.15，凸台總高／四角小凸台高 |
 | `PAD_SIZE` | 1.5，小凸台正方形邊長 |
 
@@ -42,13 +43,15 @@ CREOSON 只需本機存取，不需要將工作站服務公開到網際網路或
 |---|---|
 | `BASE_EXTRUDE` | 以原點對稱的矩形草繪，長 `BASE_L`、寬 `BASE_W`，沿 +Z 擠出 `BASE_T` |
 | `BASE_ROUNDS` | 基座4條垂直邊，半徑 `BASE_R` |
-| `MOUNT_HOLES` | 兩個對角通孔，直徑 `HOLE_D`；中心為 `(-BASE_L/2+HOLE_EDGE,-BASE_W/2+HOLE_EDGE)` 與 `(BASE_L/2-HOLE_EDGE,BASE_W/2-HOLE_EDGE)`；可用孔特徵或原生草繪貫穿切除 |
-| `MAIN_BOSS` | 在基座頂面 Z=`BASE_T`、XY中心對齊，長寬 `BOSS_L/BOSS_W`，擠出高度 `CUH-PAD_H` |
+| `MOUNT_HOLES` | 先完成基座圓角，再作兩個對角貫穿圓形切除，直徑 `HOLE_D`；中心為 `(-BASE_L/2+HOLE_EDGE,-BASE_W/2+HOLE_EDGE)` 與 `(BASE_L/2-HOLE_EDGE,BASE_W/2-HOLE_EDGE)`。孔可以切穿圓角／外邊，不能以「孔必須封閉」的限制取代真實切除；不得與中凸台相交或使最終零件分裂 |
+| `MAIN_BOSS` | 在基座頂面 Z=`BASE_T`、中心 `(BOSS_X,BOSS_Y)`，長寬 `BOSS_L/BOSS_W`，擠出高度 `CUH-PAD_H` |
 | `CORNER_PADS` | 大凸台四角各有 `PAD_SIZE` 正方形，外側邊與大凸台外邊對齊，沿 +Z 擠出 `PAD_H`；可用單一多輪廓擠出或原生陣列 |
 
 特徵名稱需與上表一致，讓 runner 能檢查。參數驅動尺寸時，請使用該模型實際的尺寸符號，例如 `<基座長度尺寸符號> = BASE_L`；不要照抄任意 `d0/d1` 對應。大凸台高度必須使用 `CUH-PAD_H`，不能將總高度誤當成大凸台擠出高度。
 
-四角小凸台中心為 `(±(BOSS_L-PAD_SIZE)/2, ±(BOSS_W-PAD_SIZE)/2)`。所有草繪應具完整尺寸／幾何約束，避免外部參考或以游離位置決定孔位。
+四角小凸台中心為 `(BOSS_X ±(BOSS_L-PAD_SIZE)/2, BOSS_Y ±(BOSS_W-PAD_SIZE)/2)`。所有草繪應具完整尺寸／幾何約束，避免外部參考或以游離位置決定孔位。介面中的「距左邊」與「距下邊」會轉成 `BOSS_X = 距左邊 − BASE_L/2`、`BOSS_Y = 距下邊 − BASE_W/2`。舊母檔若只有中心對齊關聯，需新增兩個有正負號的驅動位置尺寸後才能接受新版任務。
+
+孔破邊時，runner 以實際圓角基座與圓形切除交集計算體積，不再扣掉兩個完整圓柱。此校驗不取代 Creo 對單一有效實體的驗收；分裂或與中凸台衝突的設計不可交付。
 
 ### 錫片
 
@@ -92,7 +95,9 @@ py -3 creo_runner.py generate creo_job.json --templates "C:\pa-cad\templates" --
 
 ## 驗收範圍
 
-runner 的自動檢查仍不能取代以下人工驗收：實際 Creo完整版本、每個草繪可編輯且完整約束、所有關鍵驅動尺寸及完整設計變更流程、單一有效實體。初版報告會保留 `automatic_checks_passed_manual_acceptance_pending`，不宣稱所有驗收已完成。
+runner 的自動檢查仍不能取代以下人工驗收：實際 Creo完整版本、每個草繪可編輯且完整約束、所有關鍵驅動尺寸及完整設計變更流程、單一有效實體。特別是中凸台位移在基座內時，整體體積與外接尺寸可能完全不變；參數讀回及原有 `BASE_L`／錫厚再生探測不能證明 `BOSS_X/Y` 已正確驅動草繪，必須實際檢查位置尺寸及改值後的位置變化。初版報告會保留 `automatic_checks_passed_manual_acceptance_pending`，不宣稱所有驗收已完成。
+
+新版參數檔保留各尺寸的 `tolerances` 上下偏差。文件沒有明訂的公差只能標為「未指定」；分析暫按零計算，不等同零公差的製造規格。公差用於尺寸／配合分析，PRT 的名義實體仍使用名義尺寸。
 
 原始 ZIP 的 DXF 與 job 同一組尺寸對應；在 Creo 手動改動 PRT 後，不會自動更新這些 DXF，必須回工具同步參數再輸出。現有 DXF是名義尺寸／公差圖，不是 Creo DRW 的自動更新關聯工程圖。
 

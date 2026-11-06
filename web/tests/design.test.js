@@ -18,7 +18,7 @@ test('ceiling and stock thickness override', () => {
   const d = structuredClone(defaults); d.preform.thickness_override = .37;
   const r = calculate(d); assert.equal(r.model_thickness, .37); assert.notEqual(r.calculated_thickness, .37);
 });
-for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'pad_size', 4], ['copper', 'hole_edge_offset', 1], ['stack', 'flange_gap', .1], ['preform', 'chamfer', 3], ['preform', 'trial_delta', 1], ['preform', 'thickness_override', -1]]) {
+for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'pad_size', 4], ['copper', 'hole_edge_offset', 25], ['stack', 'flange_gap', .1], ['preform', 'chamfer', 3], ['preform', 'trial_delta', 1], ['preform', 'thickness_override', -1]]) {
   test(`invalid ${group}.${key} rejected`, () => { const d = structuredClone(defaults); d.pcb.opening_mode='manual';d[group][key] = value; assert.throws(() => calculate(d)); });
 }
 test('name and unknown settings rejected', () => {
@@ -45,7 +45,7 @@ test('four PA fields propagate to the relevant manufacturing dimensions',()=>{
   assert.equal(larger.boss_length,21.1);assert.equal(larger.boss_width,10.3);
   assert.deepEqual(larger.recommended_opening,[21.4,10.6]);
   assert.notEqual(larger.preform_area,r.preform_area);assert.notEqual(larger.solder_volume,r.solder_volume);
-  d.package.max_tolerance=.327;const tolerance=calculate(d);
+  d.tolerances['package.length']={minus:.327,plus:.327};d.tolerances['package.width']={minus:.327,plus:.327};const tolerance=calculate(d);
   assert.equal(tolerance.boss_length,larger.boss_length);assert.equal(tolerance.boss_width,larger.boss_width);
   assert.deepEqual(tolerance.recommended_opening,[21.6,10.8]);assert.ok(tolerance.solder_volume>larger.solder_volume);
   d.package.support_height=1.47;const sph=calculate(d);

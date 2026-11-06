@@ -41,7 +41,7 @@ test('Layout DXF encodes mm, distinct polarity layers and hatch holes',()=>{
   assert.ok(text.includes('green covered area'));assert.ok(text.endsWith('0\nEOF\n'));
 });
 test('invalid keepout and excessively dense array rejected',()=>{
-  const d=structuredClone(defaults);d.layout.hole_clearance=2;assert.throws(()=>calculate(d),/避讓/);
+  const d=structuredClone(defaults);d.layout.hole_clearance=2;assert.ok(calculate(d).warnings.some(w=>w.includes('避讓')));
   d.layout.hole_clearance=4;d.layout.epad_size=.01;d.layout.web_width=.01;assert.throws(()=>layoutGeometry(calculate(d)),/12000/);
 });
 test('reference assembly stack exactly preserves A B C D K and SPH',()=>{

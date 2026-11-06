@@ -29,7 +29,7 @@ export function featureLeader(a,b,bounds,label,side) {
   return [b,exit,...corners.map(c=>c.point),attach,anchor];
 }
 
-export function annotationLayout({a,b,bounds,width,height,labelWidth=120,labelHeight=30,obstacles=[]}) {
+export function annotationLayout({a,b,bounds,width,height,labelWidth=120,labelHeight=30,obstacles=[],kind='linear'}) {
   const vertical=Math.abs(b[1]-a[1])>Math.abs(b[0]-a[0]);
   const orientation=vertical?'vertical':'horizontal',gap=22,margin=9;
   const valid=box=>box.left>=margin&&box.right<=width-margin&&box.top>=margin&&box.bottom<=height-24&&
@@ -39,6 +39,20 @@ export function annotationLayout({a,b,bounds,width,height,labelWidth=120,labelHe
     const label=rect(x,y,labelWidth,labelHeight);
     if(valid(label))candidates.push({a,b,aa,bb,label,orientation,side,leader,collapsed:Math.hypot(b[0]-a[0],b[1]-a[1])<2});
   };
+  if(['radius','diameter','envelope'].includes(kind)){
+    // Place feature callouts beside their local endpoint. In particular a
+    // corner radius does not need a leader all the way around the base.
+    const x=clamp(b[0],labelWidth/2+margin,width-labelWidth/2-margin);
+    const y=clamp(b[1],labelHeight/2+margin,height-24-labelHeight/2);
+    add(b,b,bounds.right+gap+labelWidth/2,y,'right');
+    add(b,b,bounds.left-gap-labelWidth/2,y,'left');
+    add(b,b,x,bounds.top-gap-labelHeight/2,'top');
+    add(b,b,x,bounds.bottom+gap+labelHeight/2,'bottom');
+    if(candidates.length)return candidates.sort((u,v)=>{
+      const distance=c=>Math.hypot(clamp(b[0],c.label.left,c.label.right)-b[0],clamp(b[1],c.label.top,c.label.bottom)-b[1]);
+      return distance(u)-distance(v);
+    })[0];
+  }
   if(vertical){
     for(const side of ['right','left']){
       const direction=side==='right'?1:-1,x=(direction===1?bounds.right:bounds.left)+direction*gap;

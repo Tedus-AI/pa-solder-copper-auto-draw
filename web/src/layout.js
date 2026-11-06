@@ -1,4 +1,7 @@
 import clipping from 'polygon-clipping';
+import { formatDimension } from './dimension-format.js';
+import { copperFootprint } from './copper-geometry.js';
+import { toleranceSuffix } from './tolerances.js';
 
 // Curved clipping boundaries use a maximum 0.001 mm chord deviation. The same
 // polygons drive the reference viewer and the Layout DXF (no guessed outlines).
@@ -18,10 +21,11 @@ export function roundedRectangle(w, h, r) {
 }
 export function pcbCutout(r) {
   const b = r.design.pcb, radius = b.relief_diameter/2;
-  const pieces = [rectangle(0,0,b.opening_length,b.opening_width)];
+  const [cx,cy]=r.boss_center||[0,0];
+  const pieces = [rectangle(cx,cy,b.opening_length,b.opening_width)];
   // p7/p9 show four outward side semicircles. The p12 solder calculation uses
   // its stated effective pi*r² term independently; do not change that formula.
-  for (const x of [-1,1]) for (const y of [-1,1]) pieces.push(circle(x*b.opening_length/2,y*(b.opening_width/2-radius),radius));
+  for (const x of [-1,1]) for (const y of [-1,1]) pieces.push(circle(cx+x*b.opening_length/2,cy+y*(b.opening_width/2-radius),radius));
   return clipping.union(...pieces);
 }
 export function area(polygons) {
@@ -31,19 +35,20 @@ export function area(polygons) {
 
 export function layoutGeometry(r) {
   const c=r.design.copper,l=r.design.layout,b=r.design.pcb;
+  const [cx,cy]=r.boss_center||[0,0],footprint=copperFootprint(c);
   const pitch=l.epad_size+l.web_width;
-  const nx=Math.ceil(c.base_length/2/pitch)+1, ny=Math.ceil(c.base_width/2/pitch)+1;
+  const nx=Math.ceil((c.base_length/2+Math.abs(cx))/pitch)+1, ny=Math.ceil((c.base_width/2+Math.abs(cy))/pitch)+1;
   if ((2*nx+1)*(2*ny+1)>12000) throw new Error('E-PAD 格數超過12000，請縮小基座範圍或放大格距。');
-  const copper=roundedRectangle(c.base_length,c.base_width,c.corner_radius);
+  const copper=footprint.outer;
   const outer=roundedRectangle(c.base_length+2*l.border_width,c.base_width+2*l.border_width,c.corner_radius+l.border_width);
   const cutout=pcbCutout(r);
-  const centers=[-1,1].map(sign=>[sign*(c.base_length/2-c.hole_edge_offset),sign*(c.base_width/2-c.hole_edge_offset)]);
+  const centers=footprint.centers;
   const clearances=centers.map(([x,y])=>circle(x,y,l.hole_clearance/2));
-  const holes=centers.map(([x,y])=>circle(x,y,c.hole_diameter/2));
-  const allowed=clipping.difference(copper,cutout,...clearances);
+  const holes=footprint.holes;
+  const allowed=clipping.difference(copper,cutout,...clearances,...holes);
   const pads=[],cells=[];
   for(let ix=-nx;ix<=nx;ix++) for(let iy=-ny;iy<=ny;iy++) {
-    const x=ix*pitch,y=iy*pitch;
+    const x=cx+ix*pitch,y=cy+iy*pitch;
     if(Math.abs(x)-l.epad_size/2>c.base_length/2 || Math.abs(y)-l.epad_size/2>c.base_width/2) continue;
     const window=clipping.intersection(rectangle(x,y,l.epad_size,l.epad_size),allowed);
     if(!window.length || area(window)<1e-8) continue;
@@ -56,12 +61,12 @@ export function layoutGeometry(r) {
   const board=clipping.difference(rectangle(0,0,c.base_length+10,c.base_width+10),cutout,...holes);
   const marginX=c.base_length/2-Math.max(...pads.flatMap(p=>p[0].map(v=>Math.abs(v[0]))));
   const marginY=c.base_width/2-Math.max(...pads.flatMap(p=>p[0].map(v=>Math.abs(v[1]))));
-  return {copper,copperProfile:clipping.difference(copper,...holes),outer,cutout,clearances,holes,centers,pads,cells,mask,board,pitch,
+  return {copper,copperProfile:footprint.profile,copperFootprint:footprint,outer,cutout,clearances,holes,centers,pads,cells,mask,board,pitch,origin:[cx,cy],
     chord_tolerance:CHORD_TOLERANCE,epad_area:area(pads),mask_area:area(mask),
     boundary_margins:[marginX,marginY],
     notes:[
       'PPT p9: R=outer green-mask band, S=nominal square E-PAD, T=green web, U=PCB cutout, V=E-PAD exclusion diameter.',
-      'Grid centers are anchored to the PCB opening center; edge/corner windows are clipped to the copper boundary. A boundary falling in a web may leave an edge web; Layout must confirm edge treatment.',
+      'Grid centers follow the PCB opening/main-boss center; edge/corner windows are clipped to the true copper profile, including hole breakouts. A boundary falling in a web may leave an edge web; Layout must confirm edge treatment.',
       'Green mask retains the annulus between actual mounting hole D and E-PAD exclusion V. Layer polarity is explicit in the DXF.',
       'PCB relief outline follows p7/p9 side semicircles; solder volume retains the p12 effective pi*r² formula.',
       'R outer band is interpreted outside the copper boundary per p9 illustration. Curved clipping chord tolerance is 0.001 mm.',
@@ -70,10 +75,11 @@ export function layoutGeometry(r) {
 
 export function layoutDxf(r,g=layoutGeometry(r)) {
   const out=[], put=(...v)=>v.forEach(x=>out.push(String(x)));
+  const dimension=(name,value,key,extra={})=>formatDimension(name,value,{cad:true,tolerance:key?toleranceSuffix(r.design,key).replaceAll('−','-'):'',...extra});
   put(0,'SECTION',2,'HEADER',9,'$ACADVER',1,'AC1024',9,'$INSUNITS',70,4,9,'$MEASUREMENT',70,1,0,'ENDSEC',0,'SECTION',2,'TABLES');
-  put(0,'TABLE',2,'LTYPE',70,1,0,'LTYPE',2,'CONTINUOUS',70,0,3,'Solid line',72,65,73,0,40,0,0,'ENDTAB');
+  put(0,'TABLE',2,'LTYPE',5,'10',330,'0',100,'AcDbSymbolTable',70,1,0,'LTYPE',2,'CONTINUOUS',70,0,3,'Solid line',72,65,73,0,40,0,0,'ENDTAB');
   const layers={SOLDER_MASK:3,EPAD_OPENING:8,PCB_CUTOUT:1,COPPER_BOUNDARY:30,MASK_BOUNDARY:3,HOLE_CLEARANCE:2,MOUNT_HOLE:1,NOTES:7};
-  put(0,'TABLE',2,'LAYER',70,Object.keys(layers).length+1,0,'LAYER',2,'0',70,0,62,7,6,'CONTINUOUS');
+  put(0,'TABLE',2,'LAYER',5,'20',330,'0',100,'AcDbSymbolTable',70,Object.keys(layers).length+1,0,'LAYER',2,'0',70,0,62,7,6,'CONTINUOUS');
   for(const [name,color]of Object.entries(layers))put(0,'LAYER',2,name,70,0,62,color,6,'CONTINUOUS');
   put(0,'ENDTAB',0,'ENDSEC',0,'SECTION',2,'ENTITIES');
   const poly=(ring,layer)=>{const points=ring.slice(0,-1);put(0,'LWPOLYLINE',100,'AcDbEntity',8,layer,100,'AcDbPolyline',90,points.length,70,1);for(const[x,y]of points)put(10,x,20,y);};
@@ -84,18 +90,18 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   };
   for(const polygon of g.mask){polygon.forEach(ring=>poly(ring,'SOLDER_MASK'));hatch(polygon,'SOLDER_MASK');}
   for(const polygon of g.pads){polygon.forEach(ring=>poly(ring,'EPAD_OPENING'));hatch(polygon,'EPAD_OPENING');}
-  for(const [shapes,layer]of [[g.copper,'COPPER_BOUNDARY'],[g.outer,'MASK_BOUNDARY'],[g.cutout,'PCB_CUTOUT']])for(const polygon of shapes)polygon.forEach(ring=>poly(ring,layer));
+  for(const [shapes,layer]of [[g.copperProfile,'COPPER_BOUNDARY'],[g.outer,'MASK_BOUNDARY'],[g.cutout,'PCB_CUTOUT']])for(const polygon of shapes)polygon.forEach(ring=>poly(ring,layer));
   for(const[x,y]of g.centers)for(const[layer,d]of [['HOLE_CLEARANCE',r.design.layout.hole_clearance],['MOUNT_HOLE',r.design.copper.hole_diameter]])put(0,'CIRCLE',100,'AcDbEntity',8,layer,100,'AcDbCircle',10,x,20,y,30,0,40,d/2);
   const l=r.design.layout, notes=[`LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,`SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
-    [['R',l.border_width],['S',l.epad_size],['T',l.web_width],['Pitch',g.pitch]].map(([name,value])=>formatDimension(name,value,{cad:true})).join('; '),
-    `U = PCB window: ${formatDimension('M',r.design.pcb.opening_length,{cad:true})}; ${formatDimension('N',r.design.pcb.opening_width,{cad:true})}; ${formatDimension('V',l.hole_clearance,{prefix:'⌀',cad:true})}`,
-    `Origin=PCB opening center; E-PAD cells=${g.cells.length}; edge pads clipped`,
+    [['R',l.border_width,'layout.border_width'],['S',l.epad_size,'layout.epad_size'],['T',l.web_width,'layout.web_width'],['Pitch',g.pitch]].map(([name,value,key])=>dimension(name,value,key)).join('; '),
+    `U = PCB window: ${dimension('M',r.design.pcb.opening_length,'pcb.opening_length')}; ${dimension('N',r.design.pcb.opening_width,'pcb.opening_width')}; ${dimension('V',l.hole_clearance,'layout.hole_clearance',{prefix:'⌀'})}`,
+    `Origin = copper base center; PCB/E-PAD center X = ${(g.origin||[0,0])[0]} mm; Y = ${(g.origin||[0,0])[1]} mm; cells = ${g.cells.length}`,
     'V excludes E-PADs; green annulus remains between actual hole D and V.',
     'Reference layers COPPER_BOUNDARY / PCB_CUTOUT / HOLE_CLEARANCE are not mask polygons.',
     'P7 relief outline and p12 effective-volume formula are retained independently.',
     'Outer R band is outside copper outline. Curved clipping chord deviation <=0.001mm.',
     'Edge landing in a web: confirm edge treatment with Layout before manufacture.'];
+  notes.push('Unspecified tolerances are not manufacturing zero limits; see report.json.');
   notes.forEach((text,i)=>put(0,'TEXT',100,'AcDbEntity',8,'NOTES',100,'AcDbText',10,r.design.copper.base_length/2+l.border_width+4,20,18-i*1.7,30,0,40,.8,1,text,100,'AcDbText'));
   put(0,'ENDSEC',0,'EOF');return out.join('\n')+'\n';
 }
-import { formatDimension } from './dimension-format.js';

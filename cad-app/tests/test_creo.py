@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from pa_cad.creo import Creoson, CreoError, FEATURES, generate, main, prepare_job, validate_job
+from pa_cad.creo import Creoson, CreoError, FEATURES, generate, main, prepare_job, validate_job, native_copper_volume
 from pa_cad.design import Design, calculate
 from pa_cad.solid import expected_copper_volume
 
@@ -210,3 +210,25 @@ def test_native_generation_refuses_non_windows(monkeypatch, capsys):
     monkeypatch.setattr("pa_cad.creo.platform.system", lambda: "Linux")
     assert main(["generate", "unused.json", "--templates", "unused", "--output", "unused"]) == 2
     assert "Windows 11" in capsys.readouterr().err
+
+
+def test_optional_signed_boss_position_pair_and_legacy_contract(job):
+    job["native_parameters"]["copper"].update(BOSS_X=1, BOSS_Y=-1)
+    validate_job(job)
+    del job["native_parameters"]["copper"]["BOSS_X"]
+    with pytest.raises(CreoError, match="contract"):
+        validate_job(job)
+    del job["native_parameters"]["copper"]["BOSS_Y"]
+    validate_job(job)  # Legacy centered masters remain accepted.
+
+
+def test_native_contract_accepts_corner_breakouts_with_recomputed_volume(job):
+    job["native_parameters"]["copper"]["HOLE_EDGE"] = 1
+    job["expected"]["copper"]["volume"] = native_copper_volume(job["native_parameters"]["copper"])
+    validate_job(job)
+
+
+def test_native_contract_rejects_boss_offset_outside_base(job):
+    job["native_parameters"]["copper"].update(BOSS_X=18, BOSS_Y=0)
+    with pytest.raises(CreoError, match="outside"):
+        validate_job(job)

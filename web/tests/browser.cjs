@@ -32,10 +32,44 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.screenshot({path:path.join(output,'initial-desktop.png'),fullPage:true});
     const panelFit=await page.locator('#fields').evaluate(e=>({scroll:e.scrollHeight,visible:e.clientHeight,groups:[...e.children].map(g=>({group:g.dataset.group,height:g.getBoundingClientRect().height}))}));
     assert.ok(panelFit.scroll<=panelFit.visible+5,`All desktop controls should fit without scrolling: ${JSON.stringify(panelFit)}`);
+    const modelReady=async()=>{
+      await page.waitForFunction(()=>!document.getElementById('download-zip').disabled||!document.getElementById('error').hidden,null,{timeout:120000});
+      assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
+    };
+    assert.equal(await page.locator('.tolerance-input').count(),64);
+    assert.equal(await page.locator('.tolerance-input').evaluateAll(inputs=>inputs.every(i=>i.readOnly)),true);
+    assert.equal(await page.locator('#tol-copper-base_thickness-minus').inputValue(),'0.1');
+    assert.equal(await page.locator('#tol-copper-base_thickness-plus').inputValue(),'0');
+    assert.equal(await page.locator('#tol-stack-pad_height-plus').inputValue(),'0.05');
+    assert.equal(await page.locator('#tol-copper-corner_radius-plus').inputValue(),'');
+    for(const id of ['pcb-placement_accuracy','pcb-opening_tolerance','package-max_tolerance','boss-height-auto'])assert.equal(await page.locator(`#${id}`).count(),0);
+    for(const id of ['boss-total_height','stack-lead_solder','stack-board_solder','stack-flange_gap'])assert.equal(await page.locator(`#${id}`).getAttribute('aria-readonly'),'true');
+    for(const[id,value]of [['gap-x-min','0.0515'],['gap-x-max','0.2785'],['gap-y-min','0.0465'],['gap-y-max','0.2735']])assert.equal(await page.locator(`#${id}`).textContent(),value);
+    assert.equal((await page.locator('#viewer').getAttribute('data-copper-shades')).split(',').length,3,'Actual CAD export mesh must retain three copper levels');
+    assert.equal(await page.locator('#viewer').getAttribute('data-pa-features'),'pa_flange,pa_body,pa_pin');
+    const formula=async(id)=>{
+      await page.mouse.move(2,2);await page.locator(`.formula-help[data-formula-id="${id}"]`).hover();
+      await page.locator('#formula-tooltip').waitFor({state:'visible'});return await page.locator('#formula-tooltip').textContent();
+    };
+    assert.match(await formula('boss.total_height'),/1\.57/);assert.match(await page.locator('#formula-tooltip').textContent(),/0\.15/);assert.match(await page.locator('#formula-tooltip').textContent(),/0\.48/);
+    assert.match(await formula('gap-x-min'),/20\.697/);assert.match(await page.locator('#formula-tooltip').textContent(),/0\.0515/);
+    assert.match(await formula('metric-z'),/Z = \(V/);await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#download-zip').isDisabled(),false,'Reading a formula cannot invalidate CAD output');
+    await page.locator('#tol-package-length-plus').focus();
+    assert.equal(JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind,'envelope');
+    assert.equal(await page.locator('.dimension-arrow').count(),0,'PA tolerance shows max outline and a label, not a +/- segment');
+    await page.locator('.viewer-panel').screenshot({path:path.join(output,'pa-tolerance-envelope.png')});
+    await page.locator('#stack-pad_height').fill('0.18');
+    await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.51);
+    await page.locator('#pcb-thickness').fill('2.1');
+    await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.61);
+    assert.match(await formula('boss.total_height'),/0\.61/);await page.keyboard.press('Escape');
+    await page.locator('#reset').click();await modelReady();
     const annotationOutput=path.join(output,'dimensions');fs.mkdirSync(annotationOutput,{recursive:true});
-    const inputNames=await page.locator('#fields input[type=number]').evaluateAll(inputs=>inputs.map(input=>input.name));
-    assert.equal(inputNames.length,28);
+    const inputNames=await page.locator('#fields .nominal-input').evaluateAll(inputs=>inputs.map(input=>input.name));
+    assert.equal(inputNames.length,32);
     const allViews=['top','bottom','front','back','left','right','iso'];
+    const focusNominal=async key=>{const input=page.locator(`input[name="${key}"]`);await input.evaluate(el=>{el.closest("details").open=true;});await input.focus();};
     const checkAnnotation=async(key,requireLabel=true)=>{
       await page.waitForFunction(key=>document.getElementById('viewer').dataset.dimension===key&&!!document.getElementById('viewer').dataset.annotationLayout,key);
       await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
@@ -50,7 +84,7 @@ const { unzipSync, strFromU8 } = require('fflate');
         assert.equal(a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top,false,`Text covers model: ${key} ${JSON.stringify(state)}`);
         assert.ok(a.left>=0&&a.right<=state.width&&a.top>=0&&a.bottom<=state.height,`Text clipped: ${key}`);
         const notation=await page.locator('.dimension-number').textContent();
-        assert.match(notation,/^.+ = (?:±|⌀)?[\d.]+ mm$/,`Incorrect notation: ${key}`);
+        assert.match(notation,/^.+ = (?:±|⌀)?[\d.]+(?: (?:±[\d.]+|\+[\d.]+\/−[\d.]+))? mm$/,`Incorrect notation: ${key}`);
         assert.ok((await page.locator('#dimension-title').textContent()).includes(notation),'Dock and viewer must use identical notation');
         const fits=await page.locator('.dimension-value').evaluate(group=>{const box=group.querySelector('rect').getBoundingClientRect(),text=group.querySelector('.dimension-number').getBoundingClientRect();return text.left>=box.left+5&&text.right<=box.right-5;});
         assert.ok(fits,`Notation exceeds its allocated width: ${key}`);
@@ -60,7 +94,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     // Demonstrate every field, then check its label against the actual projected
     // scene bounds in all six faces and the isometric view.
     for(const key of inputNames){
-      await page.locator(`input[name="${key}"]`).focus();await checkAnnotation(key);
+      await focusNominal(key);await checkAnnotation(key);
       const kind=JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind;
       assert.equal(await page.locator('.dimension-arrow').count(),kind==='radius'?1:2,`Wrong arrow convention: ${key}`);
       await page.locator('.viewer-panel').screenshot({path:path.join(annotationOutput,`${key.replace('.','-')}.png`)});
@@ -89,7 +123,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.locator('#copper-base_thickness').focus();
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'copper.base_thickness');
     assert.equal(await page.locator('#viewer').getAttribute('data-pulse'),'breathing');
-    assert.match(await page.locator('#dimension-title').textContent(),/G.*3 mm/);
+    assert.match(await page.locator('#dimension-title').textContent(),/G = 3 \+0\/−0\.1 mm/);
     const frame1=await page.locator('#viewer').screenshot();
     const fixedText1=await page.locator('.dimension-value').screenshot();
     await new Promise(r=>setTimeout(r,250));
@@ -139,12 +173,33 @@ const { unzipSync, strFromU8 } = require('fflate');
     for (const [name, digest] of Object.entries(hashes)) assert.equal(crypto.createHash('sha256').update(files[name]).digest('hex'), digest);
     const job = JSON.parse(strFromU8(files['creo_job.json'])); assert.equal(job.step_import_acceptable, false); assert.equal(job.target.version, '7.0.10.0');
     assert.equal(report.parameters.pcb.opening_mode,'auto');assert.equal(report.parameters.pcb.opening_rule,'delta');
+    // Moving the boss translates its real solid, PA reference and PCB opening.
+    await page.locator('#boss-center_from_left').fill('23');await page.locator('#boss-center_from_bottom').fill('17');
+    await focusNominal('package.length');
+    const moved=JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout'));
+    assert.ok(Math.abs((moved.worldA[0]+moved.worldB[0])/2-3)<1e-6);
+    await page.locator('#generate').click();await modelReady();
+    const shiftedDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const shiftedFile=path.join(output,'shifted-boss.zip');await(await shiftedDownload).saveAs(shiftedFile);
+    const shiftedFiles=unzipSync(fs.readFileSync(shiftedFile)),shifted=JSON.parse(strFromU8(shiftedFiles['report.json']));
+    assert.deepEqual(shifted.results.boss_center,[3,2]);assert.ok(Math.abs(shifted.results.copper_volume-report.results.copper_volume)<1e-6);
+    const shiftedJob=JSON.parse(strFromU8(shiftedFiles['creo_job.json']));assert.equal(shiftedJob.native_parameters.copper.BOSS_X,3);assert.equal(shiftedJob.native_parameters.copper.BOSS_Y,2);
+    // A hole crossing a rounded corner must survive genuine CAD/STEP validation.
+    await page.locator('#reset').click();await modelReady();await page.locator('#copper-hole_edge_offset').fill('1');
+    await page.locator('#generate').click();await modelReady();await page.locator('#tab-copper').click();await page.locator('#view-top').click();
+    assert.equal((await page.locator('#viewer').getAttribute('data-copper-shades')).split(',').length,3);
+    await page.locator('.viewer-panel').screenshot({path:path.join(output,'corner-breakouts.png')});
+    const brokenDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const brokenFile=path.join(output,'broken-corners.zip');await(await brokenDownload).saveAs(brokenFile);
+    const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['report.json']));
+    assert.equal(broken.results.hole_breakouts,2);assert.equal((strFromU8(brokenFiles['copper.dxf']).match(/\nCIRCLE\n/g)||[]).length,0);
+    assert.equal(broken.verification,'volume_and_step_roundtrip_passed');
+    await page.locator('#reset').click();await modelReady();
     // Auto linkage must update the readonly fields, preview, thickness and actual exports.
     assert.equal(await page.locator('#pcb-opening_length').getAttribute('aria-readonly'),'true');
     await page.locator('#package-length').fill('21.07');
     await page.locator('#package-width').fill('10.28');
     await page.waitForFunction(()=>document.getElementById('pcb-opening_length').value==='21.4'&&document.getElementById('pcb-opening_width').value==='10.6');
-    await page.locator('#package-max_tolerance').fill('0.327');
+    await page.locator('#tolerance-unlock').click();
+    for(const key of ['length','width'])for(const side of ['minus','plus'])await page.locator(`#tol-package-${key}-${side}`).fill('0.327');
     await page.waitForFunction(()=>document.getElementById('pcb-opening_length').value==='21.6'&&document.getElementById('pcb-opening_width').value==='10.8');
     const oldCuh=Number(await page.locator('#metric-cuh').textContent());
     await page.locator('#package-support_height').fill('1.47');
@@ -162,7 +217,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.notEqual(linked.results.model_thickness,report.results.model_thickness);
     await page.locator('#pcb-auto').uncheck();
     await page.locator('#pcb-opening_length').fill('22');await page.locator('#pcb-opening_width').fill('11');
-    await page.locator('#package-max_tolerance').fill('0.127');
+    for(const key of ['length','width'])for(const side of ['minus','plus'])await page.locator(`#tol-package-${key}-${side}`).fill('0.127');
     await page.waitForFunction(()=>document.getElementById('viewer').dataset.previewValid==='true'&&document.getElementById('pcb-opening_length').value==='22');
     assert.equal(await page.locator('#pcb-opening_width').inputValue(),'11');
     await page.locator('#pcb-rule').selectOption('ampleon');
@@ -190,7 +245,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     await layoutFile.saveAs(path.join(output,'layout_solder_mask.dxf'));
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});
     assert.equal(await page.locator('#metric-model').textContent(), '0.370000');
-    await page.locator('#preform-chamfer').fill('1'); await page.locator('#generate').click();
+    await focusNominal('preform.chamfer');await page.locator('#preform-chamfer').fill('1'); await page.locator('#generate').click();
     await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /削角/);
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
     await page.locator('#reset').click();
@@ -198,12 +253,18 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#viewer').scrollIntoViewIfNeeded();
-    for(const key of inputNames){await page.locator(`input[name="${key}"]`).focus();await checkAnnotation(key);}
+    for(const key of inputNames){await focusNominal(key);await checkAnnotation(key);}
+    await focusNominal('copper.corner_radius');
+    const mobileRadius=await checkAnnotation('copper.corner_radius');
+    assert.ok(mobileRadius.leaderLength<120,`Radius leader must use a nearby surviving corner on mobile: ${JSON.stringify(mobileRadius)}`);
+    await page.locator('.viewer-panel').screenshot({path:path.join(output,'mobile-corner-radius.png')});
     await page.locator('#package-support_height').focus();await checkAnnotation('package.support_height');
     await page.locator('#viewer').scrollIntoViewIfNeeded();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
+    await page.locator('.formula-help[data-formula-id="boss.total_height"]').click();await page.locator('#formula-tooltip').waitFor({state:'visible'});
+    assert.ok(await page.locator('#formula-tooltip').evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;}));await page.keyboard.press('Escape');
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
-    // Review sheets accompany the 28 full-size screenshots in the CI artifact.
+    // Review sheets accompany the 32 full-size screenshots in the CI artifact.
     const review=await browser.newPage({viewport:{width:1480,height:900},deviceScaleFactor:1});
     for(let i=0;i<inputNames.length;i+=7){
       const tiles=inputNames.slice(i,i+7).map(key=>`<article><h2>${key}</h2><img src="data:image/png;base64,${fs.readFileSync(path.join(annotationOutput,`${key.replace('.','-')}.png`)).toString('base64')}"></article>`).join('');
@@ -213,7 +274,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     }
     await review.close();
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${url} — all 28 dimensions outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
+    console.log(`PASS: ${url} — all 32 dimensions outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
   } catch (e) {
     console.error(e);process.exitCode=1;
     let diagnostic='';

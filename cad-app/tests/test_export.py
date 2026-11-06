@@ -14,6 +14,8 @@ from pa_cad.cli import main
 from pa_cad.design import Design, calculate
 from pa_cad.export import export_bundle
 from pa_cad.solid import expected_copper_volume
+from pa_cad.solid import copper_block
+from pa_cad.drawing import write_copper
 
 EXAMPLE = Path(__file__).parents[1] / "examples/780-m1p.yaml"
 
@@ -95,3 +97,35 @@ def test_calculate_only_without_files(tmp_path, capsys):
     assert main([str(EXAMPLE), "--calculate-only", "-o", str(tmp_path / "new")]) == 0
     assert json.loads(capsys.readouterr().out)["preform_area"] == pytest.approx(178.76)
     assert not (tmp_path / "new").exists()
+
+
+def test_corner_breakout_and_positioned_boss_have_exact_valid_solid_volume():
+    data = Design.load(EXAMPLE).to_mapping()
+    data["copper"]["hole_edge_offset"] = 1
+    data["boss"].update(center_from_left=21, center_from_bottom=14)
+    d = Design.from_mapping(data)
+    r = calculate(d)
+    solid = copper_block(d, r)
+    assert len(solid.solids().vals()) == 1 and solid.val().isValid()
+    assert solid.val().Volume() == pytest.approx(expected_copper_volume(d, r), rel=1e-8)
+    # The boss side face shifts in XY while the base bounds stay centered.
+    top = solid.faces(">Z").vals()
+    assert min(face.Center().x for face in top) < 1 < max(face.Center().x for face in top)
+
+
+def test_positioned_boss_and_corner_breakout_dxf_matches_actual_outline(tmp_path):
+    data = Design.load(EXAMPLE).to_mapping()
+    data["copper"]["hole_edge_offset"] = 1
+    data["boss"].update(center_from_left=21, center_from_bottom=14)
+    data["tolerances"] = {"boss.length": {"minus": .03, "plus": .07}}
+    d = Design.from_mapping(data)
+    path = tmp_path/"breakout.dxf"
+    write_copper(d, calculate(d), path)
+    doc = ezdxf.readfile(path)
+    assert not doc.audit().has_errors
+    assert not doc.modelspace().query('CIRCLE[layer=="HOLES"]')
+    boss = doc.modelspace().query('LWPOLYLINE[layer=="BOSS"]')[0]
+    points = list(boss.get_points())
+    assert sum(p[0] for p in points)/4 == pytest.approx(1)
+    assert sum(p[1] for p in points)/4 == pytest.approx(-1)
+    assert any("+0.07/-0.03" in dim.dxf.text for dim in doc.modelspace().query('DIMENSION'))

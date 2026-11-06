@@ -2,9 +2,9 @@ import { octagon } from './design.js';
 
 // Display geometry only. Ratios follow the supplied H-37248KC-6/2 outline;
 // six illustrative pins are never used for manufacturing calculations.
-export function paReference(p) {
+export function paReference(p,envelope=null) {
   const sx = p.length / 20.57, sy = p.width / 9.78, sz = p.support_height / 1.57;
-  const flangeDepth = 1.02 * sz, totalHeight = 3.78 * sz, lidDepth = .15 * sz;
+  const flangeDepth = 1.02 * sz, totalHeight = 3.78 * sz;
   const bodyLength = 20.07 * sx, bodyWidth = 9.40 * sy;
   const trim = Math.min(2.72 * Math.min(sx, sy), bodyLength / 4, bodyWidth / 4);
   const pins = [];
@@ -15,9 +15,10 @@ export function paReference(p) {
   const inner = bodyWidth * .44, outer = p.width / 2 + 4.83 * sy;
   return {
     flange: { length: p.length, width: p.width, radius: .51 * Math.min(sx, sy), depth: flangeDepth },
-    body: { profile: octagon(bodyLength, bodyWidth, trim), bottom: flangeDepth, depth: totalHeight - flangeDepth - lidDepth },
-    lid: { profile: octagon(19.81 * sx, 9.15 * sy, trim * .8), bottom: totalHeight - lidDepth, depth: lidDepth },
+    // One casing, not an extra plate on top. All heights remain schematic;
+    // the pin underside below is the dimensionally meaningful SPH datum.
+    body: { profile: octagon(bodyLength, bodyWidth, trim), bottom: flangeDepth, depth: totalHeight - flangeDepth },
     pins: pins.map(pin => ({ size: [pin.width, outer - inner, .12 * sz], center: [pin.x, pin.side * (outer + inner) / 2, p.support_height + .06 * sz] })),
-    maximum: [p.length + p.max_tolerance, p.width + p.max_tolerance], totalHeight,
+    maximum: [envelope?.max_length??p.length+(p.max_tolerance||0),envelope?.max_width??p.width+(p.max_tolerance||0)], totalHeight,
   };
 }

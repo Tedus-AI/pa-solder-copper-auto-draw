@@ -27,10 +27,74 @@ FEATURES = {"copper": ["BASE_EXTRUDE", "BASE_ROUNDS", "MOUNT_HOLES", "MAIN_BOSS"
 PARAMETERS = {"copper": {"BASE_L", "BASE_W", "BASE_T", "BASE_R", "HOLE_D", "HOLE_EDGE",
                           "BOSS_L", "BOSS_W", "CUH", "PAD_SIZE", "PAD_H"},
               "preform": {"PREFORM_L", "PREFORM_W", "CHAMFER_Y", "PREFORM_Z"}}
+POSITION_PARAMETERS = {"BOSS_X", "BOSS_Y"}
 
 
 class CreoError(RuntimeError):
     pass
+
+
+def rounded_boundary_distance(x, y, length, width, radius):
+    """Signed distance to a centered rounded rectangle (negative inside)."""
+    qx, qy = abs(x)-(length/2-radius), abs(y)-(width/2-radius)
+    return math.hypot(max(qx, 0), max(qy, 0))+min(max(qx, qy), 0)-radius
+
+
+def rounded_base_area(params):
+    """Rounded base minus the actual union of its two corner-hole cuts.
+
+    Contained holes retain the exact closed form. Breakouts integrate true
+    circular sections; this stdlib implementation also ships with the runner.
+    """
+    length, width, radius = params["BASE_L"], params["BASE_W"], params["BASE_R"]
+    rad, off = params["HOLE_D"]/2, params["HOLE_EDGE"]
+    hx, hy = length/2-off, width/2-off
+    centers = [(-hx, -hy), (hx, hy)]
+    outer = length*width-(4-math.pi)*radius**2
+    if (all(rounded_boundary_distance(x, y, length, width, radius)+rad <= 1e-10 for x, y in centers)
+            and math.hypot(2*hx, 2*hy) >= 2*rad):
+        return outer-2*math.pi*rad**2
+
+    def section(x):
+        dx = max(abs(x)-(length/2-radius), 0)
+        top = width/2-radius+math.sqrt(max(radius**2-dx**2, 0))
+        intervals = []
+        for cx, cy in centers:
+            if abs(x-cx) < rad:
+                half = math.sqrt(max(rad**2-(x-cx)**2, 0))
+                lo, hi = max(-top, cy-half), min(top, cy+half)
+                if hi > lo:
+                    intervals.append((lo, hi))
+        intervals.sort()
+        removed, end = 0., -math.inf
+        for lo, hi in intervals:
+            removed += max(0, hi-max(lo, end))
+            end = max(end, hi)
+        return 2*top-removed
+
+    def integrate(a, b, fa, fm, fb, whole, eps, depth):
+        mid, left, right = (a+b)/2, (3*a+b)/4, (a+3*b)/4
+        fl, fr = section(left), section(right)
+        lval, rval = (mid-a)*(fa+4*fl+fm)/6, (b-mid)*(fm+4*fr+fb)/6
+        delta = lval+rval-whole
+        if depth <= 0 or abs(delta) <= 15*eps:
+            return lval+rval+delta/15
+        return integrate(a, mid, fa, fl, fm, lval, eps/2, depth-1)+integrate(mid, b, fm, fr, fb, rval, eps/2, depth-1)
+
+    breaks = {-length/2, length/2, -length/2+radius, length/2-radius}
+    breaks.update(max(-length/2, min(length/2, cx+s*rad)) for cx, _ in centers for s in (-1, 1))
+    points = sorted(breaks)
+    area = 0.
+    for a, b in zip(points, points[1:]):
+        fa, fm, fb = section(a), section((a+b)/2), section(b)
+        area += integrate(a, b, fa, fm, fb, (b-a)*(fa+4*fm+fb)/6, 1e-9, 25)
+    return area
+
+
+def native_copper_volume(params):
+    return (rounded_base_area(params)*params["BASE_T"]
+            + params["BOSS_L"]*params["BOSS_W"]*(params["CUH"]-params["PAD_H"])
+            + 4*params["PAD_SIZE"]**2*params["PAD_H"])
 
 
 def prepare_job(design: dict, derived: dict, volumes: dict) -> dict:
@@ -42,6 +106,12 @@ def prepare_job(design: dict, derived: dict, volumes: dict) -> dict:
                           "CUH": derived["boss_total_height"], "PAD_SIZE": c["pad_size"], "PAD_H": s["pad_height"]},
               "preform": {"PREFORM_L": derived["boss_length"], "PREFORM_W": derived["boss_width"],
                            "CHAMFER_Y": design["preform"]["chamfer"], "PREFORM_Z": derived["model_thickness"]}}
+    if "boss" in design or "boss_center" in derived:
+        center = derived.get("boss_center")
+        if center is None:
+            b = design["boss"]
+            center = [b["center_from_left"]-c["base_length"]/2, b["center_from_bottom"]-c["base_width"]/2]
+        native["copper"].update(BOSS_X=center[0], BOSS_Y=center[1])
     return {"schema_version": 2, "status": "awaiting_local_creo_execution", "target": dict(TARGET),
             "name": design["name"], "units": "mm", "required_model_type": "native_parametric_features",
             "step_import_acceptable": False, "design": design, "derived": derived,
@@ -62,13 +132,20 @@ def validate_job(job: dict):
         raise CreoError("Invalid job name or units.")
     for part in PARAMETERS:
         params = job.get("native_parameters", {}).get(part, {})
-        if set(params) != PARAMETERS[part]:
+        allowed = [PARAMETERS[part]]
+        if part == "copper":
+            allowed.append(PARAMETERS[part] | POSITION_PARAMETERS)
+        if set(params) not in allowed:
             raise CreoError(f"{part}: incorrect native parameter contract.")
         expected = job.get("expected", {}).get(part, {})
         bounds = expected.get("bounds", [])
         if len(bounds) != 3:
             raise CreoError(f"{part}: expected XYZ bounds are missing.")
-        for value in [*params.values(), expected.get("volume"), *bounds]:
+        for key, value in params.items():
+            if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                    or (key not in POSITION_PARAMETERS and value <= 0)):
+                raise CreoError(f"{part}: invalid numeric value.")
+        for value in [expected.get("volume"), *bounds]:
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
                 raise CreoError(f"{part}: invalid numeric value.")
     # The runner accepts only the exact geometry schema emitted by this tool.
@@ -78,18 +155,20 @@ def validate_job(job: dict):
             or not 0 < c["BASE_R"] < min(c["BASE_L"], c["BASE_W"])/2
             or not c["BASE_L"] > c["BOSS_L"] or not c["BASE_W"] > c["BOSS_W"]
             or not 0 < c["PAD_SIZE"] < min(c["BOSS_L"], c["BOSS_W"])/2
-            or not c["HOLE_EDGE"] >= c["BASE_R"] or not c["HOLE_EDGE"] > c["HOLE_D"]/2
-            or not 2*c["HOLE_EDGE"] < min(c["BASE_L"], c["BASE_W"])
+            or not 0 < 2*c["HOLE_EDGE"] < min(c["BASE_L"], c["BASE_W"])
             or not 2*c["PAD_SIZE"] < p["CHAMFER_Y"] < min(p["PREFORM_L"], p["PREFORM_W"])/2
             or p["PREFORM_L"] != c["BOSS_L"] or p["PREFORM_W"] != c["BOSS_W"]):
         raise CreoError("Inconsistent native geometry.")
     hx, hy = c["BASE_L"]/2-c["HOLE_EDGE"], c["BASE_W"]/2-c["HOLE_EDGE"]
-    if math.hypot(max(hx-c["BOSS_L"]/2, 0), max(hy-c["BOSS_W"]/2, 0)) <= c["HOLE_D"]/2:
-        raise CreoError("Mounting holes intersect the main boss.")
-    copper_volume = ((c["BASE_L"]*c["BASE_W"]-(4-math.pi)*c["BASE_R"]**2
-                      -2*math.pi*(c["HOLE_D"]/2)**2)*c["BASE_T"]
-                     + c["BOSS_L"]*c["BOSS_W"]*(c["CUH"]-c["PAD_H"])
-                     + 4*c["PAD_SIZE"]**2*c["PAD_H"])
+    bx, by = c.get("BOSS_X", 0), c.get("BOSS_Y", 0)
+    if any(rounded_boundary_distance(bx+sx*c["BOSS_L"]/2, by+sy*c["BOSS_W"]/2,
+                                    c["BASE_L"], c["BASE_W"], c["BASE_R"]) > 1e-8
+           for sx in (-1, 1) for sy in (-1, 1)):
+        raise CreoError("Main boss extends outside the rounded base.")
+    for sign in (-1, 1):
+        if math.hypot(max(abs(sign*hx-bx)-c["BOSS_L"]/2, 0), max(abs(sign*hy-by)-c["BOSS_W"]/2, 0)) <= c["HOLE_D"]/2:
+            raise CreoError("Mounting holes intersect the main boss.")
+    copper_volume = native_copper_volume(c)
     volume = {"copper": copper_volume,
               "preform": (p["PREFORM_L"]*p["PREFORM_W"]-2*p["CHAMFER_Y"]**2)*p["PREFORM_Z"]}
     bounds = {"copper": [c["BASE_L"], c["BASE_W"], c["BASE_T"]+c["CUH"]],
@@ -183,7 +262,7 @@ def regenerate_probe(rpc, name, part, params, expected):
     if part == "copper":
         key, delta = "BASE_L", .5
         probe["bounds"][0] += delta
-        probe["volume"] += delta*params["BASE_W"]*params["BASE_T"]
+        probe["volume"] = native_copper_volume({**params, "BASE_L": params["BASE_L"]+delta})
     else:
         key, delta = "PREFORM_Z", .01
         probe["bounds"][2] += delta
@@ -230,7 +309,7 @@ def generate(job, templates, output, rpc):
         report = {"schema_version": 1, "target": TARGET, "created_at_utc": datetime.now(timezone.utc).isoformat(),
                   "status": "automatic_checks_passed_manual_acceptance_pending", "parts": {},
                   "template_sha256": source_hashes,
-                  "manual_checks_remaining": ["Exact Creo build and OS from local preflight", "single solid body", "editable sketch constraints", "all driving dimensions / complete design change workflow"]}
+                  "manual_checks_remaining": ["Exact Creo build and OS from local preflight", "single solid body", "editable sketch constraints", "all driving dimensions / complete design change workflow", "MAIN_BOSS X/Y sketch location and positional regeneration; volume/bounds checks do not prove boss position"]}
         work = stage / "_work"
         work.mkdir()
         for part, master in masters.items():

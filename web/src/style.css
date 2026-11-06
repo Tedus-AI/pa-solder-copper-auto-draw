@@ -45,3 +45,47 @@
 .dimension-extension,.dimension-center{fill:none;stroke:#a64219;stroke-width:1;opacity:1}
 .dimension-value rect{fill:none;stroke:none}
 .dimension-number{font-variant-numeric:tabular-nums}
+
+/* Per-dimension tolerances: keep the working dimensions and source information together. */
+.tolerance-toolbar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 11px;border-bottom:1px solid #e6ecdf;background:#fafbf7;flex:none}
+.tolerance-toolbar>span{display:flex;align-items:baseline;flex-wrap:wrap;gap:7px}.tolerance-toolbar b{font-size:10px;color:#536c49;font-weight:600}.tolerance-toolbar small{font-size:9px;color:#7c8b70;line-height:1.4}
+#tolerance-unlock{border:1px solid #cbd8bd;border-radius:4px;background:#fff;color:#536d43;font-size:10px;padding:4px 8px;white-space:nowrap}
+#tolerance-unlock[aria-pressed=true]{background:#fff0da;border-color:#cca271;color:#805225}
+#fields{gap:7px;padding:7px 9px}.control-group summary{padding:5px 8px;font-size:11px;line-height:16px}
+.tolerance-grid{gap:2px;padding:5px 7px 6px}
+.dimension-head,.dimension-row{display:grid;grid-template-columns:minmax(100px,1fr) 65px 48px 48px;align-items:center;gap:4px;min-width:0}
+.dimension-head{font-size:8px;line-height:15px;color:#86957a;text-align:center;padding:0 2px 1px}.dimension-head>span:first-child{text-align:left}
+.dimension-row{border-radius:4px;padding:1px 2px;min-height:26px}
+.field-grid .dimension-row>label{display:block;padding:0;font-size:10px;line-height:1.25;color:#5c7353;min-width:0}
+.dimension-row .tolerance-source{display:inline;color:#92a484;margin-left:3px;font-size:10px}.dimension-row .tolerance-source.unspecified{color:#a27a43}
+.controls .dimension-row input{font-size:11px;height:24px;padding:3px 4px;border-radius:3px;appearance:textfield;-moz-appearance:textfield}
+.controls .dimension-row input::-webkit-inner-spin-button,.controls .dimension-row input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.controls .dimension-row .tolerance-input{font-size:10px;text-align:right;color:#596f4e;background:#f4f7ef;border-color:#e0e7d8}
+.controls .dimension-row .tolerance-input[readonly]{border-style:dotted;cursor:help}.controls .dimension-row .tolerance-input::placeholder{color:#95a18c;text-align:center}
+.tolerances-unlocked .dimension-row .tolerance-input{background:#fffaf0;border-color:#d2b992;color:#704b25}
+.field-grid .dimension-row.dimension-active{background:#fff1df;box-shadow:0 0 0 1px #e7c79f}.field-grid .dimension-row.dimension-active>label{color:#9c4e25}
+.linked-controls{font-size:9px;padding:0 8px 5px;gap:4px}.linked-controls select{font-size:9px}.linked-controls p{font-size:8px;line-height:1.4}
+.boss-links{justify-content:flex-start;gap:9px}.boss-links button{margin-left:auto;border:1px solid #d9e3ce;background:#f5f9ef;border-radius:3px;padding:3px 6px;color:#627d4c;font-size:9px}
+.group-hint{font-size:8px;padding:0 8px 6px;line-height:1.4}
+.gap-analysis{margin:0 7px 7px;border:1px solid #d8e3cf;border-radius:4px;background:#f6faf1;padding:5px 6px;color:#526f43;font-size:9px}
+.gap-heading{display:flex;justify-content:space-between;align-items:center;gap:5px;margin-bottom:3px}.gap-heading strong{font-size:9px;font-weight:600}.gap-heading span{font-size:8px;color:#7f916c}
+.gap-analysis table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}.gap-analysis th,.gap-analysis td{padding:2px 4px;text-align:right;font-size:10px}.gap-analysis thead th{font-size:8px;color:#81916f;font-weight:500;border-bottom:1px solid #dfe8d5}.gap-analysis th:first-child{text-align:left}.gap-analysis tbody th{font-weight:500;font-size:9px}.gap-analysis p{font-size:8px;line-height:1.4;margin:4px 0 0;color:#7c8d6e}.gap-analysis .interference{color:#a94426;font-weight:650}.gap-analysis[data-interference=true]{border-color:#d5a88c;background:#fff7ec}
+@media(min-width:1451px){.workspace{grid-template-columns:minmax(650px,1.02fr) minmax(0,1.32fr)}.dimension-row{grid-template-columns:minmax(110px,1fr) 66px 48px 48px}.control-group summary{font-size:11px}.controls .dimension-row input{height:24px}}
+@media(min-width:1101px) and (max-width:1450px){.workspace{grid-template-columns:minmax(550px,1.05fr) minmax(0,1.15fr)}.dimension-head,.dimension-row{grid-template-columns:minmax(78px,1fr) 54px 41px 41px;gap:3px}.field-grid .dimension-row>label{font-size:9px}.controls .dimension-row input{font-size:10px;padding:3px;height:24px}.controls .dimension-row .tolerance-input{font-size:9px}.tolerance-toolbar small{font-size:8px}.metrics strong{font-size:19px}}
+@media(max-width:1100px){.dimension-head,.dimension-row{grid-template-columns:minmax(110px,1fr) 70px 48px 48px}.controls .dimension-row input{height:27px;font-size:12px}.controls .dimension-row .tolerance-input{font-size:11px}.dimension-row{min-height:29px}.field-grid .dimension-row>label{font-size:11px}}
+@media(max-width:700px){#fields{grid-template-columns:1fr;padding:7px}.dimension-head,.dimension-row{grid-template-columns:minmax(100px,1fr) 72px 53px 53px;gap:5px}.tolerance-grid{padding:6px 8px 8px}.controls .dimension-row input{height:28px}.tolerance-toolbar{padding:7px 10px;align-items:flex-start}.tolerance-toolbar>span{display:block}.tolerance-toolbar small{display:block;margin-top:3px}.gap-analysis{font-size:10px}.gap-analysis th,.gap-analysis td{font-size:11px}.gap-analysis p{font-size:9px}.group-hint{font-size:9px}.linked-controls{font-size:10px}.linked-controls p{font-size:9px}.boss-links button{font-size:10px}.gap-heading strong{font-size:10px}}
+
+/* Independent column stacks avoid leaving a large hole below the PA settings. */
+.control-column{display:flex;flex-direction:column;gap:7px;min-width:0;align-self:start}
+@media(min-width:1101px){.dimension-row{min-height:25px}.controls .dimension-row input{height:23px}}
+@media(max-width:700px){.control-column{display:contents}}
+
+/* Small formula explanations are focusable and escape clipping in the form. */
+.formula-help{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;min-width:12px;padding:0;margin:0 0 0 4px;border:1px solid #91a489;border-radius:50%;background:#fff;color:#547347;font:600 8px/1 system-ui;vertical-align:middle;cursor:help;flex:none}
+.formula-help:hover,.formula-help:focus-visible{background:#e8f1df;border-color:#537947;color:#2e5723;outline:2px solid #d8e6c9;outline-offset:1px}
+#formula-tooltip{position:fixed;z-index:10000;width:max-content;max-width:min(370px,calc(100vw - 16px));padding:10px 12px;border:1px solid #91aa7f;border-radius:6px;background:#fffef5;color:#344c2c;box-shadow:0 5px 24px #21311d26;font-size:11px;line-height:1.65;white-space:pre-line;pointer-events:none;font-variant-numeric:tabular-nums}
+.dimension-row>label .formula-help{margin-left:3px}.gap-analysis td .formula-help{width:11px;height:11px;min-width:11px;margin-left:3px;font-size:8px}.group-hint .formula-help,.linked-controls p .formula-help{width:11px;height:11px;min-width:11px;margin-left:3px}
+.metrics span .formula-help{width:12px;height:12px;margin-left:5px}.quick-calculation .formula-help{width:11px;height:11px;min-width:11px;margin:0 3px}
+.fixed-height-note{font-size:8px;color:#7e906f}
+@media(min-width:1101px){.control-column{gap:6px}}
+@media(max-width:700px){.formula-help{width:15px;height:15px;min-width:15px;font-size:9px}#formula-tooltip{font-size:11px}}

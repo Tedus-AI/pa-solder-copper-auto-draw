@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 import yaml
+from .creo import rounded_base_area, rounded_boundary_distance
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,19 @@ class Preform:
     chamfer: float = 3.4
     trial_delta: float = 0.05
     thickness_override: float | None = None
+    length: float | None = None
+    width: float | None = None
+
+
+@dataclass(frozen=True)
+class Boss:
+    length: float | None = None
+    width: float | None = None
+    total_height: float | None = None
+    center_from_left: float | None = None
+    center_from_bottom: float | None = None
+    size_mode: str = "auto"
+    height_mode: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -74,6 +88,8 @@ class Design:
     stack: Stack
     preform: Preform
     layout: Layout = field(default_factory=Layout)
+    boss: Boss = field(default_factory=Boss)
+    tolerances: dict = field(default_factory=dict)
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -88,7 +104,7 @@ class Design:
             raise ValueError("name 須為英文字母開頭、最多 40 個英數字或 _ -")
         groups = {}
         for name, typ in (("package", Package), ("pcb", PCB), ("copper", Copper),
-                          ("stack", Stack), ("preform", Preform), ("layout", Layout)):
+                          ("stack", Stack), ("preform", Preform), ("layout", Layout), ("boss", Boss)):
             source = data.get(name, {})
             if not isinstance(source, dict):
                 raise ValueError(f"{name} 必須是 mapping")
@@ -98,25 +114,51 @@ class Design:
                 raise ValueError(f"{name} 欄位不完整或不支援: {exc}") from exc
             for f in fields(group):
                 value = getattr(group, f.name)
+                if name == "boss" and f.name in {"size_mode", "height_mode"}:
+                    if value not in {"auto", "manual"}:
+                        raise ValueError(f"boss.{f.name} 不支援此設定")
+                    continue
+                if name == "boss" and value is None:
+                    continue
                 if name == "pcb" and f.name in {"opening_mode", "opening_rule"}:
                     choices = {"auto", "manual"} if f.name == "opening_mode" else {"delta", "ampleon"}
                     if not isinstance(value, str) or value not in choices:
                         raise ValueError(f"pcb.{f.name} 不支援此設定")
                     continue
-                if name == "preform" and f.name == "thickness_override" and value is None:
+                if name == "preform" and f.name in {"thickness_override", "length", "width"} and value is None:
                     continue
                 if (isinstance(value, bool) or not isinstance(value, (int, float))
                         or not math.isfinite(value)):
                     raise ValueError(f"{name}.{f.name} 須為有限數值")
                 zero_allowed = f.name in {"max_tolerance", "placement_accuracy", "opening_tolerance",
-                                          "lead_solder", "board_solder", "flange_gap", "trial_delta"}
+                                          "lead_solder", "board_solder", "flange_gap", "trial_delta",
+                                          "center_from_left", "center_from_bottom"}
                 if value < 0 or (value == 0 and not zero_allowed):
                     raise ValueError(f"{name}.{f.name} 超出有效範圍")
             groups[name] = group
-        design = cls(data["name"], **groups)
+        tolerances = data.get("tolerances", {})
+        if not isinstance(tolerances, dict):
+            raise ValueError("tolerances 必須是 mapping")
+        for key, pair in tolerances.items():
+            if not isinstance(key, str) or not re.fullmatch(r"[a-z_]+\.[a-z_]+", key) or not isinstance(pair, dict):
+                raise ValueError("公差須為尺寸路徑與 minus/plus mapping")
+            if set(pair)-{"minus", "plus", "source"} or not {"minus", "plus"} <= set(pair):
+                raise ValueError(f"{key} 公差須包含 minus 與 plus")
+            for side in ("minus", "plus"):
+                value = pair[side]
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 <= value <= 10000:
+                    raise ValueError(f"{key} 公差須為有限非負數值")
+            if "source" in pair and not isinstance(pair["source"], str):
+                raise ValueError(f"{key} 公差來源須為文字")
+        design = cls(data["name"], **groups, tolerances=tolerances)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
+        length, width, height, center = boss_dimensions(design)
+        design = replace(design, boss=replace(design.boss, length=length, width=width, total_height=height,
+                                             center_from_left=center[0]+design.copper.base_length/2,
+                                             center_from_bottom=center[1]+design.copper.base_width/2),
+                         preform=replace(design.preform, length=length, width=width))
         calculate(design)  # Cross-field physical validation, also used by direct callers.
         return design
 
@@ -134,10 +176,46 @@ def ceil_tenth(value: float) -> float:
 
 def recommended_opening(d: Design) -> tuple[float, float]:
     factor = Decimal("0.5") if d.pcb.opening_rule == "ampleon" else Decimal("1")
-    return tuple(ceil_tenth(float(Decimal(str(v)) + Decimal(str(d.package.max_tolerance))
-                                 + Decimal(str(d.pcb.placement_accuracy))
-                                 + Decimal(str(d.pcb.opening_tolerance)) * factor))
-                 for v in (d.package.length, d.package.width))
+    return tuple(ceil_tenth(float(Decimal(str(v))+Decimal(str(tolerance(d, f"package.{axis}")[1]))
+                                 + Decimal("0.066")
+                                 + Decimal(str(tolerance(d, f"pcb.opening_{axis}")[0]))*factor))
+                 for axis, v in (("length", d.package.length), ("width", d.package.width)))
+
+
+DEFAULT_TOLERANCES = {
+    "copper.base_length": (.2, .2), "copper.base_width": (.2, .2),
+    "copper.base_thickness": (.1, 0), "copper.hole_edge_offset": (.1, .1),
+    "copper.pad_size": (.05, .05), "stack.pad_height": (.05, .05),
+    "boss.length": (.05, .05), "boss.width": (.05, .05), "boss.total_height": (.1, 0),
+    "preform.length": (.1, .1), "preform.width": (.1, .1),
+    "preform.chamfer": (0, .2), "preform.thickness_override": (.02, .02),
+}
+
+
+def tolerance(d: Design, key: str) -> tuple[float, float]:
+    if key in d.tolerances:
+        pair = d.tolerances[key]
+        return pair["minus"], pair["plus"]
+    if key in {"package.length", "package.width"}:
+        return d.package.max_tolerance, d.package.max_tolerance
+    if key in {"pcb.opening_length", "pcb.opening_width"}:
+        return d.pcb.opening_tolerance, d.pcb.opening_tolerance
+    # Zero is only a calculation fallback for an unspecified tolerance, never
+    # a claim that the source drawing specifies perfect manufacture.
+    return DEFAULT_TOLERANCES.get(key, (0., 0.))
+
+
+def boss_dimensions(d: Design):
+    b, p, s, pcb, c = d.boss, d.package, d.stack, d.pcb, d.copper
+    length = ceil_tenth(p.length) if b.size_mode == "auto" else b.length
+    width = ceil_tenth(p.width) if b.size_mode == "auto" else b.width
+    height = (pcb.thickness+s.lead_solder+s.board_solder-p.support_height-s.flange_gap+s.pad_height
+              if b.height_mode == "auto" else b.total_height)
+    if any(v is None or v <= 0 for v in (length, width, height)):
+        raise ValueError("中凸台手動尺寸與高度須為正值")
+    center = ((b.center_from_left if b.center_from_left is not None else c.base_length/2)-c.base_length/2,
+              (b.center_from_bottom if b.center_from_bottom is not None else c.base_width/2)-c.base_width/2)
+    return length, width, height, center
 
 
 @dataclass(frozen=True)
@@ -158,6 +236,9 @@ class Result:
     corner_clearance: float
     heatsink_depth: float
     warnings: tuple[str, ...]
+    boss_center: tuple[float, float]
+    copper_base_area: float
+    gap_analysis: dict
 
 
 def calculate(d: Design) -> Result:
@@ -165,8 +246,7 @@ def calculate(d: Design) -> Result:
     recommended = recommended_opening(d)
     if b.opening_mode == "auto":
         b = replace(b, opening_length=recommended[0], opening_width=recommended[1])
-    length, width = ceil_tenth(p.length), ceil_tenth(p.width)
-    height = b.thickness + s.lead_solder + s.board_solder - p.support_height - s.flange_gap + s.pad_height
+    length, width, height, center = boss_dimensions(d)
     gap = height + s.flange_gap - s.pad_height
     if not (height > s.pad_height and gap > height):
         raise ValueError("高度堆疊無效：CuH 必須大於小凸台高度，flange 必須高於小凸台頂面")
@@ -182,14 +262,17 @@ def calculate(d: Design) -> Result:
         raise ValueError("四角小凸台尺寸過大")
     if not (2 * c.pad_size < t.chamfer < min(length, width) / 2):
         raise ValueError("錫片削角須大於兩倍小凸台邊長，且小於錫片短邊的一半")
-    # A conservative, explicit hole placement rule keeps complete circles inside the
-    # rounded base and away from the central pedestal. Holes are diagonally opposed.
     off, rad = c.hole_edge_offset, c.hole_diameter / 2
-    if not (off >= c.corner_radius and off > rad and 2 * off < min(c.base_length, c.base_width)):
+    if not (off > 0 and 2 * off < min(c.base_length, c.base_width)):
         raise ValueError("吊掛孔邊距不足，或孔位不在基座內")
     hx, hy = c.base_length / 2 - off, c.base_width / 2 - off
-    if math.hypot(max(hx - length / 2, 0), max(hy - width / 2, 0)) <= rad:
-        raise ValueError("吊掛孔與大凸台相交")
+    if any(rounded_boundary_distance(center[0]+sx*length/2, center[1]+sy*width/2,
+                                    c.base_length, c.base_width, c.corner_radius) > 1e-8
+           for sx in (-1, 1) for sy in (-1, 1)):
+        raise ValueError("中凸台超出銅塊圓角基座範圍")
+    for sign in (-1, 1):
+        if math.hypot(max(abs(sign*hx-center[0])-length/2, 0), max(abs(sign*hy-center[1])-width/2, 0)) <= rad:
+            raise ValueError("吊掛孔與中凸台相交")
     cavity = (b.opening_length * b.opening_width + math.pi * (b.relief_diameter / 2) ** 2) * gap
     boss = length * width * (height - s.pad_height) + 4 * c.pad_size**2 * s.pad_height
     volume = cavity - boss
@@ -211,9 +294,21 @@ def calculate(d: Design) -> Result:
         warnings.append(f"PCB 手動開孔小於 {b.opening_rule.title()} 規則向上進位的建議值 {recommended[0]}×{recommended[1]} mm。")
     if t.thickness_override is not None:
         warnings.append("模型採用指定的 thickness_override；計算厚度與三款試片仍另列於報告。")
+    analysis = {"overlap": False, "assumptions": ["PA 與 PCB 開窗同心；僅使用尺寸上下公差，不扣除貼片精度。", "未指定的公差暫按零計算，並非零公差製造規格。"]}
+    for axis, pa, opening in (("x", p.length, b.opening_length), ("y", p.width, b.opening_width)):
+        name = "length" if axis == "x" else "width"
+        pm, pp = tolerance(d, "package."+name)
+        bm, bp = tolerance(d, "pcb.opening_"+name)
+        analysis[axis] = {"nominal": (opening-pa)/2, "min": (opening-bm-pa-pp)/2,
+                          "max": (opening+bp-pa+pm)/2}
+        analysis["overlap"] |= analysis[axis]["min"] < 0
+    base_area = rounded_base_area({"BASE_L": c.base_length, "BASE_W": c.base_width,
+                                   "BASE_R": c.corner_radius, "HOLE_D": c.hole_diameter,
+                                   "HOLE_EDGE": c.hole_edge_offset})
     return Result(length, width, height, height - s.pad_height, gap, cavity, boss,
                   volume, area, z, t.thickness_override if t.thickness_override is not None else z,
-                  trials, recommended, clearance, c.base_thickness + 0.05, tuple(warnings))
+                  trials, recommended, clearance, c.base_thickness + 0.05, tuple(warnings), center,
+                  base_area, analysis)
 
 
 def octagon(length: float, width: float, chamfer: float) -> list[tuple[float, float]]:
