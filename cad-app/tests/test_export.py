@@ -59,6 +59,50 @@ def test_dxf_holes_pads_dimensions_and_octagon(bundle):
     assert len(octagon) == 8 and octagon.closed
 
 
+def test_round_features_use_native_dimensions_quantities_and_center_lines(bundle):
+    d, folder = bundle
+    doc = ezdxf.readfile(folder / "copper.dxf")
+    audit = doc.audit()
+    assert not audit.has_errors and not audit.has_fixes
+    msp = doc.modelspace()
+    dimensions = list(msp.query("DIMENSION"))
+    radius = next(dim for dim in dimensions if dim.dimtype == 4)
+    diameter = next(dim for dim in dimensions if dim.dimtype == 3)
+    assert radius.dxf.text == "4-R = 3.00 mm"
+    assert diameter.dxf.text == "2-%%cD = 3.00 mm"
+    assert radius.get_measurement() == pytest.approx(d.copper.corner_radius)
+    assert diameter.get_measurement() == pytest.approx(d.copper.hole_diameter)
+    centers = msp.query('LINE[layer=="CENTER"]')
+    assert len(centers) == 4
+    assert doc.layers.get("CENTER").dxf.linetype == "PA_CENTER"
+    assert any(element[0] == 49 and element[1] == 0
+               for element in doc.linetypes.get("PA_CENTER").pattern_tags.tags)
+    # ezdxf's bundled EZDXF style scales measurements by 100 by default.
+    # Check delivered rendered text, not only the unchanged nominal geometry.
+    overall = next(dim for dim in dimensions if dim.dxf.text.startswith("E ="))
+    assert [entity.text for entity in overall.virtual_entities()
+            if entity.dxftype() == "MTEXT"] == ["E = 40 +/-0.2 mm"]
+
+
+@pytest.mark.parametrize("value,nominal", [(3.005, "3.005"), (.000001, "0.000001")])
+def test_round_labels_retain_finer_nonzero_measurements(tmp_path, value, nominal):
+    data = Design.load(EXAMPLE).to_mapping()
+    data["copper"].update(corner_radius=value, hole_diameter=value)
+    d = Design.from_mapping(data)
+    path = tmp_path/"precision.dxf"
+    write_copper(d, calculate(d), path)
+    doc = ezdxf.readfile(path)
+    audit = doc.audit()
+    assert not audit.has_errors and not audit.has_fixes
+    dimensions = list(doc.modelspace().query("DIMENSION"))
+    radius = next(dim for dim in dimensions if dim.dimtype == 4)
+    diameter = next(dim for dim in dimensions if dim.dimtype == 3)
+    assert radius.dxf.text == f"4-R = {nominal} mm"
+    assert diameter.dxf.text == f"2-%%cD = {nominal} mm"
+    assert radius.get_measurement() == pytest.approx(value)
+    assert diameter.get_measurement() == pytest.approx(value)
+
+
 def test_bundle_hashes_report_and_no_fake_prt(bundle):
     d, folder = bundle
     report = json.loads((folder / "report.json").read_text())
@@ -129,3 +173,9 @@ def test_positioned_boss_and_corner_breakout_dxf_matches_actual_outline(tmp_path
     assert sum(p[0] for p in points)/4 == pytest.approx(1)
     assert sum(p[1] for p in points)/4 == pytest.approx(-1)
     assert any("+0.07/-0.03" in dim.dxf.text for dim in doc.modelspace().query('DIMENSION'))
+    radius = next(dim for dim in doc.modelspace().query("DIMENSION") if dim.dimtype == 4)
+    point = radius.dxf.defpoint4
+    hx = d.copper.base_length/2-d.copper.hole_edge_offset
+    hy = d.copper.base_width/2-d.copper.hole_edge_offset
+    assert all(((point.x-sign*hx)**2+(point.y-sign*hy)**2)**.5 > d.copper.hole_diameter/2
+               for sign in (-1, 1))

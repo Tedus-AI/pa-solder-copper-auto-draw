@@ -51,6 +51,8 @@ export function dimensionFor(key,r,layout){
  if(relative){dimension.a=movePoint(dimension.a);dimension.b=movePoint(dimension.b);}
  dimension.kind=dimensionSpecs[key]?.kind||'linear';dimension.view=key==='package.support_height'?'right':Math.abs(dimension.b[2]-dimension.a[2])>1e-8?'front':'top';
  if(key==='copper.corner_radius')dimension.radiusCandidates=visibleRadiusCandidates;
+ if(['copper.hole_diameter','layout.hole_clearance'].includes(key))dimension.diameterCenters=[1,-1].map(sign=>[sign*hx,sign*hy,z.base]);
+ if(key==='pcb.relief_diameter')dimension.diameterCenters=[[1,1],[1,-1],[-1,1],[-1,-1]].map(([sx,sy])=>[cx+sx*b.opening_length/2,cy+sy*(b.opening_width/2-b.relief_diameter/2),z.pcbTop]);
  dimension.tolerance=getTolerance(d,key);dimension.toleranceSuffix=toleranceSuffix(d,key);dimension.toleranceSource=toleranceSource(d,key);
  dimension.toleranceLabel=`${dimensionSpecs[key]?.name||key} 公差 = ${toleranceText(d,key)}`;
  if(key==='package.support_height'){dimension.datums=['下端：PA 底面','上端：PIN 底面'];dimension.referenceSegments=[[[pinX,-p.width/2,z.flange],[pinX,p.width/2,z.flange]],[[pinX,p.width/2+4.83*p.width/9.78,z.lead],[pinX,9.4*p.width/9.78*.44,z.lead]]].map(segment=>segment.map(movePoint));}

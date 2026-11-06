@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from decimal import Decimal
 from pathlib import Path
 
 import ezdxf
@@ -22,9 +23,13 @@ def _document():
     doc = ezdxf.new("R2010", setup=True)
     doc.units = ezdxf.units.MM
     doc.header["$MEASUREMENT"] = 1
+    doc.linetypes.new("PA_CENTER", dxfattribs={
+        "description": "Long dash-dot centre line", "pattern": [3.5, 2.5, -.5, 0., -.5]})
     for name, color in {"OUTLINE": 7, "BOSS": 3, "PAD": 2, "HOLES": 1,
-                        "DIM": 4, "NOTES": 7, "SIDE": 6}.items():
+                        "DIM": 4, "NOTES": 7, "SIDE": 6, "CENTER": 8}.items():
         doc.layers.new(name, dxfattribs={"color": color})
+    doc.layers.get("CENTER").dxf.linetype = "PA_CENTER"
+    doc.layers.get("CENTER").dxf.lineweight = 13
     return doc, doc.modelspace()
 
 
@@ -45,8 +50,66 @@ def _text(msp, text, x, y, height=1.0):
 def _dim(msp, p1, p2, base, angle=0, text="<>"):
     msp.add_linear_dim(base=base, p1=p1, p2=p2, angle=angle, text=text,
                        dimstyle="EZDXF", override={"dimtxt": .8, "dimasz": .4,
-                                                    "dimdec": 4, "dimgap": .3},
+                                                    "dimdec": 4, "dimgap": .3,
+                                                    "dimlfac": 1, "dimblk": ""},
                        dxfattribs={"layer": "DIM"}).render()
+
+
+def _feature_text(d, key, name, value, quantity, symbol=""):
+    minus, plus = tolerance(d, key)
+    deviation = "" if minus == plus == 0 else _tol(d, key)
+    number = f"{value:.4f}"
+    if float(number) == 0 and value != 0:
+        # Preserve a small nonzero measurement instead of labelling it zero.
+        number = format(Decimal(f"{value:.4g}"), "f")
+    whole, _, fraction = number.partition(".")
+    nominal = whole+"."+fraction.rstrip("0").ljust(2, "0")
+    return f"{quantity}-{symbol}{name} = {nominal}{deviation} mm"
+
+
+def _round_feature_dimensions(msp, d, x, y, hx, hy):
+    """Native radial/diametral dimensions, kept outside the plan geometry.
+
+    A radius leader references a surviving arc, not the removed part of a
+    mounting-hole breakout. Center lines describe the hole cutting axes and
+    remain reference geometry even when a hole becomes an open corner cut.
+    """
+    c = d.copper
+    hole_radius = c.hole_diameter/2
+    for px, py in [(-hx, -hy), (hx, hy)]:
+        reach = hole_radius+1
+        for start, end in [((px-reach, py), (px+reach, py)),
+                           ((px, py-reach), (px, py+reach))]:
+            msp.add_line(start, end, dxfattribs={"layer": "CENTER"})
+    style = {"dimtxt": .8, "dimasz": .45, "dimdec": 2,
+             "dimgap": .3, "dimtoh": 1, "dimtih": 1, "dimcen": 0,
+             "dimlfac": 1, "dimblk": "", "dimtofl": 1}
+    # The upper-right hole has a short diagonal leader into clear space
+    # beyond the plan. It stays below the overall E dimension at y+5.
+    diameter = msp.add_diameter_dim(center=(hx, hy), radius=hole_radius,
+                                    location=(x+3, y+3),
+                                    text=_feature_text(d, "copper.hole_diameter", "D",
+                                                       c.hole_diameter, 2, "%%c"),
+                                    override=style, dxfattribs={"layer": "DIM"})
+    diameter.render()
+    # ezdxf's user-location renderer draws only the near half of an outside
+    # diameter line. Complete it through the centre to the opposite circle
+    # endpoint; the native DIMENSION still stores the true full diameter.
+    msp.add_line(diameter.dimension.dxf.defpoint, (hx, hy),
+                 dxfattribs={"layer": "DIM"})
+    for sx, sy in [(-1, -1), (1, -1), (-1, 1), (1, 1)]:
+        center = (sx*(x-c.corner_radius), sy*(y-c.corner_radius))
+        point = (center[0]+sx*c.corner_radius/math.sqrt(2),
+                 center[1]+sy*c.corner_radius/math.sqrt(2))
+        if any(math.hypot(point[0]-px, point[1]-py) <= hole_radius+1e-6
+               for px, py in [(-hx, -hy), (hx, hy)]):
+            continue
+        msp.add_radius_dim(center=center, radius=c.corner_radius,
+                           location=(sx*(x+4), sy*(y+4)),
+                           text=_feature_text(d, "copper.corner_radius", "R",
+                                              c.corner_radius, 4),
+                           override=style, dxfattribs={"layer": "DIM"}).render()
+        break
 
 
 def _profile(msp, center, baseline, base_width, boss_width, pad, g, lower, k, boss_offset=0):
@@ -101,6 +164,7 @@ def write_copper(d: Design, r: Result, path: Path):
     _dim(msp, (hx,hy), (hx,y), (x+10,0), 90, "C = <>"+_tol(d,"copper.hole_edge_offset")+" mm")
     _dim(msp, (-x,by), (bx,by), (0,-y-6), text="Boss datum X = <> mm")
     _dim(msp, (bx,-y), (bx,by), (x+14,0), 90, "Boss datum Y = <> mm")
+    _round_feature_dimensions(msp, d, x, y, hx, hy)
     baseline = -y-16
     _profile(msp, 0, baseline, c.base_length, r.boss_length, c.pad_size,
              c.base_thickness, r.boss_lower_height, d.stack.pad_height, bx)
@@ -114,8 +178,8 @@ def write_copper(d: Design, r: Result, path: Path):
     notes = [
         f"{d.name} / COPPER BLOCK / mm / nominal geometry",
         f"E = {c.base_length:g}{_tol(d,'copper.base_length')} mm; F = {c.base_width:g}{_tol(d,'copper.base_width')} mm",
-        f"G = {c.base_thickness:g}{_tol(d,'copper.base_thickness')} mm; R = {c.corner_radius:g}{_tol(d,'copper.corner_radius')} mm",
-        f"2X D = DIA {c.hole_diameter:g}{_tol(d,'copper.hole_diameter')} mm THRU; C = {c.hole_edge_offset:g}{_tol(d,'copper.hole_edge_offset')} mm",
+        f"G = {c.base_thickness:g}{_tol(d,'copper.base_thickness')} mm; "+_feature_text(d,"copper.corner_radius","R",c.corner_radius,4),
+        _feature_text(d,"copper.hole_diameter","D",c.hole_diameter,2,"%%c")+f" THRU; C = {c.hole_edge_offset:g}{_tol(d,'copper.hole_edge_offset')} mm",
         f"I = {r.boss_length:g}{_tol(d,'boss.length')} mm; H = {r.boss_width:g}{_tol(d,'boss.width')} mm",
         f"L(CuH) = {r.boss_total_height:.4f}{_tol(d,'boss.total_height')} mm above base top",
         f"4X J = {c.pad_size:g}{_tol(d,'copper.pad_size')} mm; K = {d.stack.pad_height:g}{_tol(d,'stack.pad_height')} mm",
@@ -124,6 +188,7 @@ def write_copper(d: Design, r: Result, path: Path):
         "Package: sulfur-free paper, individually heat-sealed plastic bag",
         f"Mating heatsink depth: {r.heatsink_depth:g} +/-0.05",
         "Base E/F require thermal and RF approval; no inferred final base size.",
+        "Unspecified tolerances are not manufacturing zero limits; see report.json.",
         "See report.json for assumptions / unresolved PDF differences.",
     ]
     _text(msp, "\\P".join(notes), notes_x, y+12, .9)

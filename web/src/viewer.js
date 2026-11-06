@@ -231,7 +231,16 @@ export class CADViewer {
     const bounds={left:Math.min(...projected.map(p=>p[0])),right:Math.max(...projected.map(p=>p[0])),top:Math.min(...projected.map(p=>p[1])),bottom:Math.max(...projected.map(p=>p[1]))};
     const origin=this.el.getBoundingClientRect(),cube=this.el.querySelector('.view-cube').getBoundingClientRect();
     const obstacles=[{left:cube.left-origin.left,right:cube.right-origin.left,top:cube.top-origin.top,bottom:cube.bottom-origin.top}];
-    const candidates=d.kind==='radius'&&d.radiusCandidates?.length?d.radiusCandidates:[{a:d.a,b:d.b}];
+    let candidates=d.kind==='radius'&&d.radiusCandidates?.length?d.radiusCandidates:[{a:d.a,b:d.b}];
+    if(d.kind==='diameter'){
+      // Equivalent holes share one nominal diameter. Choose the real hole and
+      // a true in-plane diameter direction that gives the shortest available
+      // leader, rather than forcing a vertical O line around the whole PCB.
+      const centers=d.diameterCenters?.length?d.diameterCenters:[d.a.map((v,i)=>(v+d.b[i])/2)],radius=d.value/2;
+      const first=Math.atan2(d.b[1]-d.a[1],d.b[0]-d.a[0]),angles=[first,...Array.from({length:8},(_,i)=>i*Math.PI/4)],seen=new Set();
+      const directions=angles.map(angle=>[Math.cos(angle),Math.sin(angle)]).filter(u=>{const id=u.map(v=>v.toFixed(8)).join(',');if(seen.has(id))return false;seen.add(id);return true;});
+      candidates=centers.flatMap(center=>directions.map(([x,y])=>({a:[center[0]-radius*x,center[1]-radius*y,center[2]],b:[center[0]+radius*x,center[1]+radius*y,center[2]]})));
+    }
     const choices=candidates.map((world,index)=>{
       const layout=annotationLayout({a:this.project(world.a),b:this.project(world.b),bounds,width,height,labelWidth:this.labelWidth(),labelHeight:this.labelHeight(),obstacles,kind:d.kind});
       const path=['radius','diameter','envelope'].includes(d.kind)?featureLeader(layout.a,layout.b,bounds,layout.label,layout.side):[];
@@ -245,6 +254,23 @@ export class CADViewer {
     for(const [a,b]of d.referenceSegments||[])line([this.project(a),this.project(b)],{class:'dimension-datum-line'});
     const extension=(a,b)=>{const length=Math.hypot(b[0]-a[0],b[1]-a[1]);if(length<1)return;const u=[(b[0]-a[0])/length,(b[1]-a[1])/length];line([[a[0]+u[0]*3,a[1]+u[1]*3],[b[0]+u[0]*4,b[1]+u[1]*4]],{class:'dimension-extension'});};
     const isRadius=d.kind==='radius',isDiameter=d.kind==='diameter',isEnvelope=d.kind==='envelope';
+    if(isDiameter){
+      // Thin chain lines identify the true drilled/cutout circle center. The
+      // two axes live in its XY plane, so an isometric view projects them with
+      // the feature instead of drawing an unrelated screen-space crosshair.
+      const a=vec(chosen.world.a),b=vec(chosen.world.b),center=a.clone().add(b).multiplyScalar(.5),diameter=b.distanceTo(a);
+      if(diameter>1e-10){
+        const axes=[new THREE.Vector3(1,0,0),new THREE.Vector3(0,1,0)];
+        axes.forEach((direction,index)=>{
+          const from=this.project(center.clone().addScaledVector(direction,-diameter/2)),to=this.project(center.clone().addScaledVector(direction,diameter/2));
+          const length=Math.hypot(to[0]-from[0],to[1]-from[1]);if(length<.5)return;
+          const u=[(to[0]-from[0])/length,(to[1]-from[1])/length],extension=8,total=length+extension*2;
+          line([[from[0]-u[0]*extension,from[1]-u[1]*extension],[to[0]+u[0]*extension,to[1]+u[1]*extension]],{
+            class:'dimension-centerline','data-axis':index===0?'x':'y',fill:'none',stroke:'#687a70','stroke-width':.9,'stroke-dasharray':'10 3 1 3','stroke-dashoffset':(5-total/2)%17,'stroke-linecap':'butt',opacity:1,
+          });
+        });
+      }
+    }
     let arrowA=layout.aa,arrowB=layout.bb;
     if(isEnvelope){
       if(chosen.path.length)line(chosen.path,{class:'dimension-leader'});

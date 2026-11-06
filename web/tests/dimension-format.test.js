@@ -19,13 +19,14 @@ test('PA, coded, descriptive, diameter and tolerance formats follow the requeste
   for(const[key,value,expected]of [
     ['package.length',20.57,'PA(L) = 20.57 mm'],['package.width',9.78,'PA(W) = 9.78 mm'],
     ['package.support_height',1.57,'SPH = 1.57 mm'],['copper.base_length',40,'E = 40 mm'],
-    ['copper.corner_radius',3,'R = 3 mm'],['copper.hole_diameter',3,'D = ⌀3 mm'],
-    ['pcb.relief_diameter',2,'O = ⌀2 mm'],['layout.hole_clearance',4,'V = ⌀4 mm'],
+    ['copper.corner_radius',3,'4-R = 3.00 mm'],['copper.hole_diameter',3,'2-⌀D = 3.00 mm'],
+    ['pcb.relief_diameter',2,'4-⌀O = 2.00 mm'],['layout.hole_clearance',4,'2-⌀V = 4.00 mm'],
     ['boss.length',20.6,'I = 20.6 mm'],['boss.width',9.8,'H = 9.8 mm'],['boss.total_height',.48,'L = 0.48 mm'],
     ['boss.center_from_left',20,'Xc = 20 mm'],['preform.length',20.6,'W = 20.6 mm'],['preform.trial_delta',.05,'試片厚度增減量 = ±0.05 mm'],
   ])assert.equal(dimensionLabel({key,value}),expected);
   assert.throws(()=>dimensionLabel({key:'unmapped',value:1}),/Missing dimension/);
   assert.equal(formatDimension('微小公差',.000001), '微小公差 = 0.000001 mm');
+  assert.equal(dimensionLabel({key:'copper.hole_diameter',value:3.005}),'2-⌀D = 3.005 mm','Minimum decimal precision must not discard an entered size');
 });
 test('radius and diameter use distinct measurement geometry',()=>{
   const r=calculate(defaults);
@@ -35,8 +36,9 @@ test('radius and diameter use distinct measurement geometry',()=>{
 });
 test('downloaded drawing notation retains codes, units and CAD glyphs',()=>{
   const r=calculate(defaults),copper=drawing(r,'copper'),preform=drawing(r,'preform'),layout=layoutDxf(r,layoutGeometry(r));
-  assert.ok(copper.includes('E = 40 %%p0.2 mm'));assert.ok(copper.includes('D = %%c3 mm'));
+  assert.ok(copper.includes('E = 40 %%p0.2 mm'));assert.ok(copper.includes('2-%%cD = 3.00 mm'));
+  assert.ok(copper.includes('4-R = 3.00 mm'));
   assert.ok(copper.includes('CuH(L) = 0.48 +0/-0.1 mm'));
-  assert.ok(preform.includes('W = 20.6 %%p0.1 mm'));assert.ok(preform.includes('Y = 3.4 +0.2/-0 mm'));
-  assert.ok(layout.includes('R = 1 mm'));assert.ok(layout.includes('V = %%c4 mm'));
+  assert.ok(preform.includes('W = 20.6 %%p0.1 mm'));assert.ok(preform.includes('4-Y = 3.40 +0.2/-0 mm'));
+  assert.ok(layout.includes('R = 1 mm'));assert.ok(layout.includes('2-%%cV = 4.00 mm'));
 });

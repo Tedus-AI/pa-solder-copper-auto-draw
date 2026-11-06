@@ -77,12 +77,16 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   const out=[], put=(...v)=>v.forEach(x=>out.push(String(x)));
   const dimension=(name,value,key,extra={})=>formatDimension(name,value,{cad:true,tolerance:key?toleranceSuffix(r.design,key).replaceAll('−','-'):'',...extra});
   put(0,'SECTION',2,'HEADER',9,'$ACADVER',1,'AC1024',9,'$INSUNITS',70,4,9,'$MEASUREMENT',70,1,0,'ENDSEC',0,'SECTION',2,'TABLES');
-  put(0,'TABLE',2,'LTYPE',5,'10',330,'0',100,'AcDbSymbolTable',70,1,0,'LTYPE',2,'CONTINUOUS',70,0,3,'Solid line',72,65,73,0,40,0,0,'ENDTAB');
-  const layers={SOLDER_MASK:3,EPAD_OPENING:8,PCB_CUTOUT:1,COPPER_BOUNDARY:30,MASK_BOUNDARY:3,HOLE_CLEARANCE:2,MOUNT_HOLE:1,NOTES:7};
+  put(0,'TABLE',2,'LTYPE',5,'10',330,'0',100,'AcDbSymbolTable',70,2,0,'LTYPE',2,'CONTINUOUS',70,0,3,'Solid line',72,65,73,0,40,0);
+  put(0,'LTYPE',2,'CENTER',70,0,3,'Center: long dash, gap, short dash, gap',72,65,73,4,40,4,49,2.4,74,0,49,-.6,74,0,49,.4,74,0,49,-.6,74,0,0,'ENDTAB');
+  const layers={SOLDER_MASK:3,EPAD_OPENING:8,PCB_CUTOUT:1,COPPER_BOUNDARY:30,MASK_BOUNDARY:3,HOLE_CLEARANCE:2,MOUNT_HOLE:1,NOTES:7,DIM:1,CENTER:8};
   put(0,'TABLE',2,'LAYER',5,'20',330,'0',100,'AcDbSymbolTable',70,Object.keys(layers).length+1,0,'LAYER',2,'0',70,0,62,7,6,'CONTINUOUS');
-  for(const [name,color]of Object.entries(layers))put(0,'LAYER',2,name,70,0,62,color,6,'CONTINUOUS');
+  for(const [name,color]of Object.entries(layers))put(0,'LAYER',2,name,70,0,62,color,6,name==='CENTER'?'CENTER':'CONTINUOUS');
   put(0,'ENDTAB',0,'ENDSEC',0,'SECTION',2,'ENTITIES');
   const poly=(ring,layer)=>{const points=ring.slice(0,-1);put(0,'LWPOLYLINE',100,'AcDbEntity',8,layer,100,'AcDbPolyline',90,points.length,70,1);for(const[x,y]of points)put(10,x,20,y);};
+  const line=(a,b,layer='DIM')=>put(0,'LINE',100,'AcDbEntity',8,layer,100,'AcDbLine',10,a[0],20,a[1],30,0,11,b[0],21,b[1],31,0,...(layer==='CENTER'?[48,.5]:[]));
+  const centerMark=(x,y,r)=>{line([x-r-.9,y],[x+r+.9,y],'CENTER');line([x,y-r-.9],[x,y+r+.9],'CENTER');};
+  const arrow=(tip,direction)=>{const length=Math.hypot(...direction),u=direction.map(v=>v/length),base=[tip[0]+u[0]*.8,tip[1]+u[1]*.8],normal=[-u[1]*.22,u[0]*.22],a=[base[0]+normal[0],base[1]+normal[1]],b=[base[0]-normal[0],base[1]-normal[1]];put(0,'SOLID',100,'AcDbEntity',8,'DIM',100,'AcDbTrace',10,tip[0],20,tip[1],30,0,11,a[0],21,a[1],31,0,12,b[0],22,b[1],32,0,13,b[0],23,b[1],33,0);};
   const hatch=(polygon,layer)=>{
     put(0,'HATCH',100,'AcDbEntity',8,layer,100,'AcDbHatch',10,0,20,0,30,0,210,0,220,0,230,1,2,'SOLID',70,1,71,0,91,polygon.length);
     polygon.forEach((ring,i)=>{const points=ring.slice(0,-1);put(92,i===0?3:2,72,0,73,1,93,points.length);for(const[x,y]of points)put(10,x,20,y);put(97,0);});
@@ -92,9 +96,21 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   for(const polygon of g.pads){polygon.forEach(ring=>poly(ring,'EPAD_OPENING'));hatch(polygon,'EPAD_OPENING');}
   for(const [shapes,layer]of [[g.copperProfile,'COPPER_BOUNDARY'],[g.outer,'MASK_BOUNDARY'],[g.cutout,'PCB_CUTOUT']])for(const polygon of shapes)polygon.forEach(ring=>poly(ring,layer));
   for(const[x,y]of g.centers)for(const[layer,d]of [['HOLE_CLEARANCE',r.design.layout.hole_clearance],['MOUNT_HOLE',r.design.copper.hole_diameter]])put(0,'CIRCLE',100,'AcDbEntity',8,layer,100,'AcDbCircle',10,x,20,y,30,0,40,d/2);
-  const l=r.design.layout, notes=[`LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,`SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
+  const l=r.design.layout;
+  for(const[x,y]of g.centers)centerMark(x,y,Math.max(l.hole_clearance,r.design.copper.hole_diameter)/2);
+  const [cx,cy]=g.origin||[0,0],o=r.design.pcb.relief_diameter/2;
+  for(const sx of[-1,1])for(const sy of[-1,1])centerMark(cx+sx*r.design.pcb.opening_length/2,cy+sy*(r.design.pcb.opening_width/2-o),o);
+  const vLabel=dimension('V',l.hole_clearance,'layout.hole_clearance',{quantity:2,featureSymbol:'⌀',prefix:'',minDigits:2});
+  const hole=g.centers[1],vr=l.hole_clearance/2,dir=[1/Math.SQRT2,1/Math.SQRT2],a=[hole[0]-dir[0]*vr,hole[1]-dir[1]*vr],b=[hole[0]+dir[0]*vr,hole[1]+dir[1]*vr],outside=l.hole_clearance<2;
+  line(a,b);arrow(a,outside?dir.map(v=>-v):dir);arrow(b,outside?dir:dir.map(v=>-v));
+  if(outside)line([a[0]-dir[0],a[1]-dir[1]],[b[0]+dir[0],b[1]+dir[1]]);
+  const knee=[r.design.copper.base_length/2+l.border_width+3,r.design.copper.base_width/2+l.border_width+3],shelf=Math.max(8,vLabel.replaceAll('%%c','⌀').replaceAll('%%p','±').length*.45);
+  line(b,knee);line(knee,[knee[0]+shelf,knee[1]]);
+  put(0,'TEXT',100,'AcDbEntity',8,'DIM',100,'AcDbText',10,knee[0]+.2,20,knee[1]+.7,30,0,40,.8,1,vLabel,100,'AcDbText');
+  const notes=[`LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,`SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
     [['R',l.border_width,'layout.border_width'],['S',l.epad_size,'layout.epad_size'],['T',l.web_width,'layout.web_width'],['Pitch',g.pitch]].map(([name,value,key])=>dimension(name,value,key)).join('; '),
-    `U = PCB window: ${dimension('M',r.design.pcb.opening_length,'pcb.opening_length')}; ${dimension('N',r.design.pcb.opening_width,'pcb.opening_width')}; ${dimension('V',l.hole_clearance,'layout.hole_clearance',{prefix:'⌀'})}`,
+    `U = PCB window: ${dimension('M',r.design.pcb.opening_length,'pcb.opening_length')}; ${dimension('N',r.design.pcb.opening_width,'pcb.opening_width')}`,
+    `${dimension('O',r.design.pcb.relief_diameter,'pcb.relief_diameter',{quantity:4,featureSymbol:'⌀',prefix:'',minDigits:2})}; ${vLabel}`,
     `Origin = copper base center; PCB/E-PAD center X = ${(g.origin||[0,0])[0]} mm; Y = ${(g.origin||[0,0])[1]} mm; cells = ${g.cells.length}`,
     'V excludes E-PADs; green annulus remains between actual hole D and V.',
     'Reference layers COPPER_BOUNDARY / PCB_CUTOUT / HOLE_CLEARANCE are not mask polygons.',

@@ -46,6 +46,9 @@ document.addEventListener('scroll',()=>{
 document.addEventListener('keydown',event=>{if(event.key==='Escape')hideFormula();});document.addEventListener('pointerdown',event=>{if(!event.target.closest('.formula-help')&&!formulaTooltip.contains(event.target))hideFormula();});
 
 $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
+// Compact visible labels retain the full quantity name in their formula help.
+for(const[id,label]of [['metric-z','計算 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
+const toleranceLegend=$('tolerance-status').parentElement.querySelector('small');toleranceLegend.title=toleranceLegend.textContent;toleranceLegend.textContent='−／＋偏差；* 原資料未指定，空白暫按 0';
 
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
@@ -71,6 +74,7 @@ const allPaths=Object.entries(fields).flatMap(([group,[,names]])=>Object.keys(na
 const groupPaths=group=>allPaths.filter(path=>path.startsWith(group+'.'));
 const hasPath=path=>allPaths.includes(path);
 const sourceFor=path=>toleranceDefaults[path]?.source||'未指定';
+const compactCaptions={'boss.center_from_left':'距左邊 Xc','boss.center_from_bottom':'距下邊 Yc','preform.thickness_override':'指定錫厚 Z','stack.board_solder':'銅塊／PCB 錫厚 B'};
 const unknownTolerance=path=>/未指定|未提供|unknown/i.test(sourceFor(path));
 const uiGroups=[
   {id:'package',title:'PA 封裝',paths:groupPaths('package'),open:true},
@@ -90,7 +94,7 @@ for(const group of uiGroups){
   const head=document.createElement('div');head.className='dimension-head';head.innerHTML='<span>尺寸 · mm</span><span>名義值</span><span>− 公差</span><span>＋ 公差</span>';grid.append(head);
   for(const path of group.paths){
     const[g,key]=path.split('.'),title=titleFor(path),row=document.createElement('div');row.className='dimension-row';row.dataset.dimension=path;
-    const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.textContent=title.replace(/ ±$/,'')+' =';
+    const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.title=title;const captionText=document.createElement('span');captionText.className='dimension-caption';captionText.textContent=(compactCaptions[path]||title).replace(/ ±$/,'')+' =';caption.append(captionText);
     const source=document.createElement('span');source.className='tolerance-source'+(unknownTolerance(path)?' unspecified':'');source.textContent=unknownTolerance(path)?'*':'·';source.title=unknownTolerance(path)?'資料未指定公差；分析暫按 0，解鎖後可手動輸入。':sourceFor(path);caption.append(source);row.append(caption);
     if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom'].includes(path))formulaHelp(caption,path,title);
     const input=document.createElement('input');input.type='number';input.className='nominal-input';input.name=path;input.id=path.replace('.','-');

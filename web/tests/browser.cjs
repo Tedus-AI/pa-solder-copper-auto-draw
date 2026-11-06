@@ -8,6 +8,7 @@ const { unzipSync, strFromU8 } = require('fflate');
 
 (async () => {
   const output = process.env.TEST_OUTPUT || '/tmp/pa-cad-web-test'; fs.mkdirSync(output, { recursive: true });
+  const liveSmoke=process.env.SMOKE_ONLY==='1';
   let server, browser, page;
   const url = process.env.BASE_URL || 'http://127.0.0.1:4173/pa-solder-copper-auto-draw/';
   try {
@@ -32,6 +33,9 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.screenshot({path:path.join(output,'initial-desktop.png'),fullPage:true});
     const panelFit=await page.locator('#fields').evaluate(e=>({scroll:e.scrollHeight,visible:e.clientHeight,groups:[...e.children].map(g=>({group:g.dataset.group,height:g.getBoundingClientRect().height}))}));
     assert.ok(panelFit.scroll<=panelFit.visible+5,`All desktop controls should fit without scrolling: ${JSON.stringify(panelFit)}`);
+    const workspace=await page.evaluate(()=>({settings:document.querySelector('.controls').getBoundingClientRect().width,viewer:document.querySelector('#viewer').getBoundingClientRect().width,cards:[...document.querySelectorAll('.control-group')].map(el=>el.getBoundingClientRect().width)}));
+    assert.ok(workspace.settings<=620&&workspace.viewer>=1920*.65,`Desktop must prioritize the 3D canvas: ${JSON.stringify(workspace)}`);
+    assert.ok(Math.max(...workspace.cards)-Math.min(...workspace.cards)<1,'Settings cards must have equal widths');
     const modelReady=async()=>{
       await page.waitForFunction(()=>!document.getElementById('download-zip').disabled||!document.getElementById('error').hidden,null,{timeout:120000});
       assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
@@ -68,6 +72,9 @@ const { unzipSync, strFromU8 } = require('fflate');
     const annotationOutput=path.join(output,'dimensions');fs.mkdirSync(annotationOutput,{recursive:true});
     const inputNames=await page.locator('#fields .nominal-input').evaluateAll(inputs=>inputs.map(input=>input.name));
     assert.equal(inputNames.length,32);
+    // The build verifies every field in every view. The deployed-site run
+    // repeats representative geometry from each component plus all CAD exports.
+    const annotationNames=liveSmoke?['package.length','package.support_height','pcb.relief_diameter','copper.corner_radius','copper.hole_diameter','boss.total_height','preform.thickness_override','layout.hole_clearance']:inputNames;
     const allViews=['top','bottom','front','back','left','right','iso'];
     const focusNominal=async key=>{const input=page.locator(`input[name="${key}"]`);await input.evaluate(el=>{el.closest("details").open=true;});await input.focus();};
     const checkAnnotation=async(key,requireLabel=true)=>{
@@ -93,10 +100,18 @@ const { unzipSync, strFromU8 } = require('fflate');
     };
     // Demonstrate every field, then check its label against the actual projected
     // scene bounds in all six faces and the isometric view.
-    for(const key of inputNames){
+    for(const key of annotationNames){
       await focusNominal(key);await checkAnnotation(key);
       const kind=JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind;
       assert.equal(await page.locator('.dimension-arrow').count(),kind==='radius'?1:2,`Wrong arrow convention: ${key}`);
+      if(key==='copper.corner_radius')assert.equal(await page.locator('.dimension-number').textContent(),'4-R = 3.00 mm');
+      if(kind==='diameter'){
+        const expected={'copper.hole_diameter':3,'pcb.relief_diameter':2,'layout.hole_clearance':4}[key];
+        const geometry=JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout'));
+        assert.ok(Math.abs(Math.hypot(...geometry.worldA.map((v,i)=>v-geometry.worldB[i]))-expected)<1e-8,'A rotated diameter must retain its actual size');
+        assert.equal(await page.locator('.dimension-centerline').count(),2,'Hole diameter needs both centerline axes in plan view');
+      }
+      if(key==='copper.hole_diameter')assert.equal(await page.locator('.dimension-number').textContent(),'2-⌀D = 3.00 mm');
       await page.locator('.viewer-panel').screenshot({path:path.join(annotationOutput,`${key.replace('.','-')}.png`)});
       for(const view of allViews){await page.locator(`#view-${view}`).click();await checkAnnotation(key);}
     }
@@ -253,28 +268,32 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#viewer').scrollIntoViewIfNeeded();
-    for(const key of inputNames){await focusNominal(key);await checkAnnotation(key);}
+    for(const key of annotationNames){await focusNominal(key);await checkAnnotation(key);}
     await focusNominal('copper.corner_radius');
     const mobileRadius=await checkAnnotation('copper.corner_radius');
     assert.ok(mobileRadius.leaderLength<120,`Radius leader must use a nearby surviving corner on mobile: ${JSON.stringify(mobileRadius)}`);
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'mobile-corner-radius.png')});
+    for(const key of ['copper.hole_diameter','pcb.relief_diameter','layout.hole_clearance']){
+      await focusNominal(key);const diameter=await checkAnnotation(key);
+      assert.ok(diameter.leaderLength<150,`Diameter leader must use a nearby circle on mobile: ${JSON.stringify(diameter)}`);
+    }
     await page.locator('#package-support_height').focus();await checkAnnotation('package.support_height');
     await page.locator('#viewer').scrollIntoViewIfNeeded();
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.locator('.formula-help[data-formula-id="boss.total_height"]').click();await page.locator('#formula-tooltip').waitFor({state:'visible'});
     assert.ok(await page.locator('#formula-tooltip').evaluate(el=>{const r=el.getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;}));await page.keyboard.press('Escape');
     await page.screenshot({ path: path.join(output, 'mobile.png'), fullPage: true });
-    // Review sheets accompany the 32 full-size screenshots in the CI artifact.
+    // Review sheets accompany the full-size screenshots in the CI artifact.
     const review=await browser.newPage({viewport:{width:1480,height:900},deviceScaleFactor:1});
-    for(let i=0;i<inputNames.length;i+=7){
-      const tiles=inputNames.slice(i,i+7).map(key=>`<article><h2>${key}</h2><img src="data:image/png;base64,${fs.readFileSync(path.join(annotationOutput,`${key.replace('.','-')}.png`)).toString('base64')}"></article>`).join('');
+    for(let i=0;i<annotationNames.length;i+=7){
+      const tiles=annotationNames.slice(i,i+7).map(key=>`<article><h2>${key}</h2><img src="data:image/png;base64,${fs.readFileSync(path.join(annotationOutput,`${key.replace('.','-')}.png`)).toString('base64')}"></article>`).join('');
       await review.setContent(`<!doctype html><meta charset="utf-8"><style>*{box-sizing:border-box}body{margin:0;padding:8px;background:#eaf0e8;display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:max-content;gap:8px;font-family:system-ui}article{background:white;border:1px solid #cdd9c5;border-radius:5px;align-self:start}h2{font-size:13px;padding:5px 10px;margin:0;color:#253e2c}img{display:block;width:100%;height:auto}</style>${tiles}`);
       await review.evaluate(async()=>{await Promise.all([...document.images].map(img=>img.decode()));await new Promise(resolve=>requestAnimationFrame(resolve));});
       await review.screenshot({path:path.join(output,`dimensions-review-${i/7+1}.png`),fullPage:true});
     }
     await review.close();
     assert.deepEqual(errors, []);
-    console.log(`PASS: ${url} — all 32 dimensions outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
+    console.log(`PASS: ${url} — ${liveSmoke?'eight representative dimensions':'all 32 dimensions'} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
   } catch (e) {
     console.error(e);process.exitCode=1;
     let diagnostic='';
