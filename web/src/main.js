@@ -9,11 +9,12 @@ import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { CADViewer } from './viewer.js';
 import { BrowserProjectStore } from './project-store.js';
+import {chamferFor,TRIAL_DELTA,emptyTrial,trialChoices} from './preform-rules.js';
 import { createCalculationGuide } from './calculation-guide.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
-let layoutKey='', cachedLayout=null, tolerancesUnlocked=false;
+let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial();
 const projectStore=new BrowserProjectStore();let activeProjectId=null,rebuildQueued=false,projectMetadataValid=true;
 const downloadButtons=['download-zip','download-dxf','download-step'];
 const formulaButtons=new Map();let activeFormulaButton=null;
@@ -55,6 +56,7 @@ $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 // Compact visible labels retain the full quantity name in their formula help.
 for(const[id,label]of [['metric-z','計算 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
 const toleranceLegend=$('tolerance-status').parentElement.querySelector('small');toleranceLegend.title=toleranceLegend.textContent;toleranceLegend.textContent='−／＋偏差；* 原資料未指定，空白暫按 0';
+const toleranceToolbar=document.querySelector('.tolerance-toolbar');toleranceToolbar.title=toleranceLegend.title;document.querySelector('.control-heading').insertBefore(toleranceToolbar,document.querySelector('.config-tools'));
 
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
@@ -80,7 +82,7 @@ const allPaths=Object.entries(fields).flatMap(([group,[,names]])=>Object.keys(na
 const groupPaths=group=>allPaths.filter(path=>path.startsWith(group+'.'));
 const hasPath=path=>allPaths.includes(path);
 const sourceFor=path=>toleranceDefaults[path]?.source||'未指定';
-const compactCaptions={'boss.center_from_left':'距左邊 Xc','boss.center_from_bottom':'距下邊 Yc','preform.thickness_override':'指定錫厚 Z','stack.board_solder':'銅塊／PCB 錫厚 B'};
+const compactCaptions={'boss.center_from_left':'距左邊 Xc','boss.center_from_bottom':'距下邊 Yc','preform.thickness_override':'選定錫厚 Z','stack.board_solder':'銅塊／PCB 錫厚 B'};
 const unknownTolerance=path=>/未指定|未提供|unknown/i.test(sourceFor(path));
 const uiGroups=[
   {id:'package',title:'PA 封裝',paths:groupPaths('package'),open:true},
@@ -103,7 +105,7 @@ for(const group of uiGroups){
     const[g,key]=path.split('.'),title=titleFor(path),row=document.createElement('div');row.className='dimension-row';row.dataset.dimension=path;
     const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.title=title;const captionText=document.createElement('span');captionText.className='dimension-caption';captionText.textContent=(compactCaptions[path]||title).replace(/ ±$/,'')+' =';caption.append(captionText);
     const source=document.createElement('span');source.className='tolerance-source'+(unknownTolerance(path)?' unspecified':'');source.textContent=unknownTolerance(path)?'*':'·';source.title=unknownTolerance(path)?'資料未指定公差；分析暫按 0，解鎖後可手動輸入。':sourceFor(path);caption.append(source);row.append(caption);
-    if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom'].includes(path))formulaHelp(caption,path,title);
+    if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom','preform.chamfer','preform.trial_delta'].includes(path))formulaHelp(caption,path,title);
     const input=document.createElement('input');input.type='number';input.className='nominal-input';input.name=path;input.id=path.replace('.','-');
     input.step='any';input.min='0';input.max='10000';input.inputMode='decimal';input.required=key!=='thickness_override';input.value=defaults[g][key]??'';
     input.setAttribute('aria-label',`${title} mm`);if(key==='thickness_override')input.placeholder='自動';row.append(input);
@@ -117,7 +119,9 @@ for(const group of uiGroups){
     grid.append(row);
   }
   details.append(grid);
-  if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表 ↗';details.append(button);}
+  if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表 ↗';details.append(button);
+    const trials=document.createElement('div');trials.className='trial-selection';trials.innerHTML='<div id="trial-candidates" class="trial-candidates"></div><label for="trial-choice">錫片厚度驗證後選定</label><div class="trial-confirm"><select id="trial-choice" aria-label="錫片厚度驗證後選定"></select><button id="trial-lock" type="button" aria-pressed="false" title="鎖定此案的驗證結果">🔓</button></div><p id="trial-result-status" aria-live="polite"></p>';trials.append(grid.querySelector('[data-dimension="preform.thickness_override"]'));details.append(trials);}
+
   if(group.id==='copper'){const box=document.createElement('fieldset');box.className='hole-selection';box.innerHTML='<legend>吊掛孔角位（俯視，可複選）</legend>'+[['top_left','左上'],['top_right','右上'],['bottom_left','左下'],['bottom_right','右下']].map(([key,label])=>`<label><input type="checkbox" data-hole-corner="${key}">${label}</label>`).join('');details.append(box);}
   if(group.id==='pcb'){
     const links=document.createElement('div');links.className='linked-controls';links.innerHTML='<label><input id="pcb-auto" type="checkbox" checked>開窗 M/N 自動計算</label><select id="pcb-rule" aria-label="PCB 開窗設計規則"><option value="delta">Delta</option><option value="ampleon">Ampleon</option></select><p id="opening-chain"></p>';details.append(links);
@@ -148,7 +152,7 @@ const upper=document.createElement('div');upper.className='control-region upper-
 controlColumns[0].append(groupPanels.get('package'),groupPanels.get('stack'));controlColumns[1].append(groupPanels.get('pcb'));upper.append(...controlColumns);
 const lower=document.createElement('div');lower.className='control-region lower-controls';lower.append(groupPanels.get('preform'),groupPanels.get('layout'));
 $('fields').replaceChildren(upper,copperPanel,lower);
-for(const[id,label]of [['metric-cuh','中凸台總高'],['metric-z','計算錫厚'],['metric-model','模型錫厚'],['metric-volume','所需錫量']])formulaHelp($(id).parentElement.querySelector('span'),id,label);
+for(const[id,label]of [['metric-l','中凸台總高'],['metric-z','計算錫厚'],['metric-model','模型錫厚'],['metric-volume','所需錫量']])formulaHelp($(id).parentElement.querySelector('span'),id,label);
 for(const[id,label]of [['v-cavity','容腔體積'],['v-boss','凸台體積'],['v-area','錫片面積'],['trials','三款試片厚度']]){const button=formulaHelp(null,id,label);$(id).insertAdjacentElement('afterend',button);}
 function updateToleranceLock(){
   document.querySelectorAll('.tolerance-input').forEach(input=>{input.readOnly=!tolerancesUnlocked;input.setAttribute('aria-readonly',String(!tolerancesUnlocked));});
@@ -168,12 +172,14 @@ function formValues(){
       d.tolerances[path][sign]=raw===''?0:Number(raw);
     }
   }
+  d.trial_result=structuredClone(trialRecord);
   d.copper.hole_corners=[...document.querySelectorAll('[data-hole-corner]:checked')].map(e=>e.dataset.holeCorner);
   d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
   d.boss.size_mode=$('boss-size-auto').checked?'auto':'manual';d.boss.height_mode='auto';
   return d;
 }
 function fill(d){
+  trialRecord=structuredClone(d.trial_result??emptyTrial());
   projectMetadataValid=true;$('name').value=d.name;
   $('project-name').value=d.project?.name??d.name??'未命名專案';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
@@ -194,6 +200,11 @@ function syncLinkedFields(d){
   const height=d.pcb.thickness+d.stack.lead_solder+d.stack.board_solder-d.package.support_height-d.stack.flange_gap+d.stack.pad_height;
   derivedValue('boss.total_height',height,true,'L 自動計算；調整 PCB 板厚 C 或小凸台高度 K，SPH 從 PA 封裝帶入。');d.boss.total_height=height;
   for(const key of ['length','width']){derivedValue(`preform.${key}`,d.boss[key],true,'錫片長寬跟隨中凸台 I/H。');d.preform[key]=d.boss[key];}
+  d.preform.chamfer=chamferFor(d.copper.pad_size);d.preform.trial_delta=TRIAL_DELTA;
+  derivedValue('preform.chamfer',d.preform.chamfer,true,'Y = round(2 × J + √2 × 0.2828, 2) mm；固定間隙基準，取兩位小數。');
+  inputFor('preform.chamfer').value=d.preform.chamfer.toFixed(2);
+  derivedValue('preform.trial_delta',TRIAL_DELTA,true,'三款試片固定採計算厚度 ±0.15 mm。');
+  inputFor('preform.thickness_override').readOnly=true;inputFor('preform.thickness_override').setAttribute('aria-readonly','true');
   return d;
 }
 function status(text){$('status').textContent=text;}
@@ -242,8 +253,8 @@ function saveProject(asNew=false){
     clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
     const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;
     $('project-name').value=design.project.name;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
-    projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);
-  }catch(e){projectMessage(e.message,true);}
+    projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
+  }catch(e){projectMessage(e.message,true);return null;}
 }
 function initializeProjects(){
   fill(structuredClone(defaults));
@@ -299,8 +310,11 @@ for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addE
 });
 $('export-part').addEventListener('change',event=>part=event.target.value);
 for(const component of ['copper','preform','pcb','pa','epad'])$(`ref-${component}`).addEventListener('change',event=>viewer.setReference(component,event.target.checked));
+for(const component of ['copper','preform','pcb','pa','epad']){
+ const label=$(`ref-${component}`).closest('label'),button=document.createElement('button');button.type='button';button.className='transparency-toggle';button.dataset.transparency=component;button.textContent='◐';button.setAttribute('aria-label',`${label.textContent.trim()}透明切換`);button.setAttribute('aria-pressed',String(viewer.transparent[component]));button.title='切換半透明／實體（保留零件顯示）';label.insertAdjacentElement('afterend',button);button.addEventListener('click',()=>{viewer.setTransparency(component,!viewer.transparent[component]);button.setAttribute('aria-pressed',String(viewer.transparent[component]));});
+}
 $('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
-for(const view of ['iso',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
+for(const view of ['iso','iso-bottom',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
 $('view-orthographic').addEventListener('click',()=>viewer.setView(viewer.lastOrthographicView||'top'));
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
@@ -308,8 +322,18 @@ $('calculation-guide-open').addEventListener('click',showCalculationGuide);
 $('help-open').addEventListener('click',()=>$('help-dialog').showModal());
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
+function renderTrial(r){
+  const labels=['下','中','上'];$('trial-candidates').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('span');el.textContent=`${labels[i]} ${v.toFixed(4)}`;return el;}));
+  $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(6)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked;
+  $('trial-lock').textContent=trialRecord.locked?'🔒':'🔓';$('trial-lock').setAttribute('aria-pressed',String(trialRecord.locked));$('trial-lock').title=trialRecord.locked?'解鎖後重新選定試片':'鎖定並儲存此案的驗證結果';
+  $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(6)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(6)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
+  inputFor('preform.thickness_override').value=r.model_thickness.toFixed(4);
+}
+$('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);});
+$('trial-lock').addEventListener('click',()=>{const previous=structuredClone(trialRecord);try{if(trialRecord.locked){trialRecord={...emptyTrial(),choice:trialRecord.choice};}else{const r=calculate(syncLinkedFields(formValues()));trialRecord={choice:trialRecord.choice,locked:true,value:r.model_thickness,signature:r.trial_signature,confirmed_at:new Date().toISOString()};}invalidate();refreshPreview(true);if(!saveProject())throw new Error('試片結果無法儲存，已保留原鎖定狀態；請確認瀏覽器儲存空間。');submitProjectModel();}catch(e){trialRecord=previous;refreshPreview();error(e.message);}});
 function renderMetrics(r){
-  for(const[id,v,digits]of [['metric-cuh',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
+  renderTrial(r);
+  for(const[id,v,digits]of [['metric-l',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
   $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ')+' mm';
   $('warnings').replaceChildren(...r.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
@@ -333,8 +357,13 @@ function renderMetrics(r){
 }
 function renderFormulaHelp(r){
   const d=r.design,b=d.pcb,p=d.package,c=d.copper,s=d.stack,t=d.preform,f=v=>Number(v.toFixed(6)).toString();
+  setFormula('preform.chamfer',`Y = round(2 × J + √2 × 0.2828, 2)
+= round(2 × ${f(c.pad_size)} + √2 × 0.2828, 2) = ${t.chamfer.toFixed(2)} mm
+採第11頁的45°幾何關係；間隙基準依目前設計設定為0.2828 mm。
+Y四捨五入到小數第二位，實際間隙 = ${f(r.corner_clearance)} mm。`);
+  setFormula('preform.trial_delta','三款試片：Z − 0.15、Z、Z + 0.15 mm。增減量固定；製造公差另行設定。');
   const height=`L = C + A + B − SPH − D + K\n= ${f(b.thickness)} + ${f(s.lead_solder)} + ${f(s.board_solder)} − ${f(p.support_height)} − ${f(s.flange_gap)} + ${f(s.pad_height)} = ${f(r.boss_total_height)} mm\nA/B/D 為製程建議定值；調整 C、K，SPH 由 PA 帶入。`;
-  for(const id of ['boss.total_height','metric-cuh','stack-total','boss-upper'])setFormula(id,height);
+  for(const id of ['boss.total_height','metric-l','stack-total','boss-upper'])setFormula(id,height);
   for(const[index,key]of ['opening_length','opening_width'].entries()){
     const axis=index?'W':'L',pa=index?p.width:p.length,paTol=getTolerance(d,index?'package.width':'package.length'),windowTol=getTolerance(d,`pcb.${key}`),factor=r.opening_chain.factor,raw=r.opening_chain.raw[index],rounded=r.recommended_opening[index];
     setFormula(`pcb.${key}`,`${index?'N':'M'} = PA(${axis}) + PA 上偏差 + 貼片機能力常數 + 開窗下偏差${factor===.5?' / 2':''}，再向上取到 0.1 mm\n= ${f(pa)} + ${f(paTol.plus)} + ${f(r.opening_chain.placement_allowance??.066)} + ${f(windowTol.minus)}${factor===.5?' / 2':''} = ${f(raw)} → ${f(rounded)} mm\n常數來自 PPT 第8頁；下偏差補償開窗加工縮小，不作為貼片位置的尺寸公差。`,b.opening_mode==='auto');
@@ -351,8 +380,8 @@ function renderFormulaHelp(r){
   const boss=`V₂ = I × H × (L − K) + 4 × J² × K\n= ${f(r.boss_length)} × ${f(r.boss_width)} × ${f(r.boss_lower_height)} + 4 × ${f(c.pad_size)}² × ${f(s.pad_height)} = ${f(r.boss_volume)} mm³。`;
   const volume=`V₁ = V₁₋₁ − V₂\n= ${f(r.cavity_volume)} − ${f(r.boss_volume)} = ${f(r.solder_volume)} mm³。`;
   const area=`A₁ = W × X − 2 × Y²\n= ${f(t.length)} × ${f(t.width)} − 2 × ${f(t.chamfer)}² = ${f(r.preform_area)} mm²。`;
-  const z=`Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`;
-  setFormula('v-cavity',cavity);setFormula('v-boss',boss);setFormula('v-area',area);setFormula('metric-volume',volume);setFormula('metric-z',z);setFormula('metric-model',t.thickness_override===null?`模型 Z 自動採用計算 Z = ${f(r.calculated_thickness)} mm。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`:`模型 Z 使用指定錫厚 = ${f(r.model_thickness)} mm。\n計算 Z = ${f(r.calculated_thickness)} mm，保留作比較。\n點選 ? 開啟體積圖解與 Excel 計算表對照。`);
+  const z=`Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`;
+  setFormula('v-cavity',cavity);setFormula('v-boss',boss);setFormula('v-area',area);setFormula('metric-volume',volume);setFormula('metric-z',z);setFormula('metric-model',t.thickness_override===null?`模型 Z 自動採用計算 Z = ${f(r.calculated_thickness)} mm。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`:`模型 Z 使用目前選定試片 = ${f(r.model_thickness)} mm。\n計算 Z = ${f(r.calculated_thickness)} mm，保留作比較。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`);
   setFormula('trials',`三款試片厚度 = 計算 Z − 增減量、Z、Z + 增減量\n= ${f(r.calculated_thickness)} − ${f(t.trial_delta)}、${f(r.calculated_thickness)}、${f(r.calculated_thickness)} + ${f(t.trial_delta)}\n= ${r.trial_thicknesses.map(f).join(' / ')} mm。`);
   for(const axis of ['x','y']){
     const g=r.gap_analysis[axis],window=g.window,pa=g.pa;
@@ -392,6 +421,7 @@ $('design-form').addEventListener('submit',async event=>{
   result=null;downloadButtons.forEach(id=>$(id).disabled=true);$('viewer').dataset.ready='false';
   const valid=refreshPreview(true);if(!valid)return;
   const current=revision;
+  if(valid.results.trial_status==='stale'){error('設計尺寸已變更，請先解鎖舊試驗結果，再建立新試片模型。');return;}
   try{
     busy=true;$('generate').disabled=true;status('開始建立出圖模型…');
     const model=await requestModel(valid.results.design);

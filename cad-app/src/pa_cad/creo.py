@@ -115,7 +115,7 @@ def prepare_job(design: dict, derived: dict, volumes: dict) -> dict:
                           "BOSS_L": derived["boss_length"], "BOSS_W": derived["boss_width"],
                           "CUH": derived["boss_total_height"], "PAD_SIZE": c["pad_size"], "PAD_H": s["pad_height"]},
               "preform": {"PREFORM_L": derived["boss_length"], "PREFORM_W": derived["boss_width"],
-                           "CHAMFER_Y": design["preform"]["chamfer"], "PREFORM_Z": derived["model_thickness"]}}
+                           "CHAMFER_Y": derived.get("preform_chamfer", design["preform"]["chamfer"]), "PREFORM_Z": derived["model_thickness"]}}
     if copper_hole_mask(c) != 9:
         native["copper"]["HOLE_MASK"] = copper_hole_mask(c)
     if "boss" in design or "boss_center" in derived:
@@ -136,6 +136,8 @@ def prepare_job(design: dict, derived: dict, volumes: dict) -> dict:
 
 
 def validate_job(job: dict):
+    if job.get("derived", {}).get("trial_status")=="stale":
+        raise CreoError("Design changed: unlock and revalidate the recorded trial result.")
     if job.get("schema_version") != 2 or job.get("target") != TARGET:
         raise CreoError("Job must target Creo Parametric 7.0.10.0 / Windows 11 (schema 2).")
     if job.get("required_model_type") != "native_parametric_features" or job.get("step_import_acceptable") is not False:

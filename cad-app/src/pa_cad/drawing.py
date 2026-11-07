@@ -211,12 +211,12 @@ def write_copper(d: Design, r: Result, path: Path):
 
 def write_preform(d: Design, r: Result, path: Path):
     doc, msp = _document()
-    _poly(msp, octagon(r.boss_length, r.boss_width, d.preform.chamfer))
+    _poly(msp, octagon(r.boss_length, r.boss_width, r.preform_chamfer))
     x, y = r.boss_length/2, r.boss_width/2
     _dim(msp, (-x,0), (x,0), (0,y+4), text="W = <>"+_tol(d,"preform.length")+" mm")
     _dim(msp, (0,-y), (0,y), (-x-4,0), 90, "X = <>"+_tol(d,"preform.width")+" mm")
-    _dim(msp, (-x,-y+d.preform.chamfer), (-x+d.preform.chamfer,-y),
-         (0,-y-4), text=f"Y = {d.preform.chamfer:g}{_tol(d,'preform.chamfer')} mm (45 deg)")
+    _dim(msp, (-x,-y+r.preform_chamfer), (-x+r.preform_chamfer,-y),
+         (0,-y-4), text=f"Y = {r.preform_chamfer:g}{_tol(d,'preform.chamfer')} mm (45 deg)")
     baseline = -y-12
     _rect(msp, 0, baseline+r.model_thickness/2, r.boss_length, r.model_thickness, "SIDE")
     _dim(msp, (x,baseline), (x,baseline+r.model_thickness), (x+4,baseline),
@@ -224,7 +224,7 @@ def write_preform(d: Design, r: Result, path: Path):
     _text(msp, "FRONT (1:1)", -x, baseline-3)
     notes = [f"{d.name} / SOLDER PREFORM / mm / design dimensions (Typ.)",
              f"W = {r.boss_length:g}{_tol(d,'preform.length')} mm; X = {r.boss_width:g}{_tol(d,'preform.width')} mm",
-             f"4X 45 deg chamfer: Y = {d.preform.chamfer:g}{_tol(d,'preform.chamfer')} mm",
+             f"4X 45 deg chamfer: Y = {r.preform_chamfer:g}{_tol(d,'preform.chamfer')} mm",
              f"Z = {r.model_thickness:.6f}{_tol(d,'preform.thickness_override')} mm",
              f"Calculated Z: {r.calculated_thickness:.6f}; A1: {r.preform_area:.6f} mm2",
              "Material: SAC305 (96.5Sn3Ag0.5Cu), coated with 0.5% F8 flux",

@@ -2,13 +2,17 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields, field, replace
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 import math
 from pathlib import Path
 import re
 
 import yaml
 from .creo import rounded_base_area, rounded_boundary_distance
+
+
+def chamfer_for(pad):
+    return float(Decimal(str(2*pad+math.sqrt(2)*.2828)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
 @dataclass(frozen=True)
@@ -53,8 +57,8 @@ class Stack:
 
 @dataclass(frozen=True)
 class Preform:
-    chamfer: float = 3.4
-    trial_delta: float = 0.05
+    chamfer: float = chamfer_for(1.5)
+    trial_delta: float = 0.15
     thickness_override: float | None = None
     length: float | None = None
     width: float | None = None
@@ -99,6 +103,7 @@ class Design:
     boss: Boss = field(default_factory=Boss)
     tolerances: dict = field(default_factory=dict)
     project: Project = field(default_factory=Project)
+    trial_result: dict = field(default_factory=lambda: {"choice":"middle", "locked":False, "value":None, "signature":None, "confirmed_at":None})
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -125,6 +130,15 @@ class Design:
                 raise ValueError(f"project.{key} 須為最多 100 字的有效文字")
             project_values[key] = value
         project = Project(**project_values)
+        trial = {"choice":"middle", "locked":False, "value":None, "signature":None, "confirmed_at":None}
+        source_trial = data.get("trial_result", {})
+        if not isinstance(source_trial, dict) or set(source_trial)-set(trial):
+            raise ValueError("試片驗證記錄格式無效")
+        trial.update(source_trial)
+        if trial["choice"] not in ("lower", "middle", "upper") or not isinstance(trial["locked"], bool):
+            raise ValueError("試片選項或鎖定狀態無效")
+        if trial["locked"] and (isinstance(trial["value"],bool) or not isinstance(trial["value"],(float,int)) or not math.isfinite(trial["value"]) or trial["value"]<=0 or not isinstance(trial["signature"],str) or not isinstance(trial["confirmed_at"],str)):
+            raise ValueError("已鎖定試片須有尺寸、設計記錄與驗證時間")
         groups = {}
         for name, typ in (("package", Package), ("pcb", PCB), ("copper", Copper),
                           ("stack", Stack), ("preform", Preform), ("layout", Layout), ("boss", Boss)):
@@ -177,7 +191,7 @@ class Design:
                     raise ValueError(f"{key} 公差須為有限非負數值")
             if "source" in pair and not isinstance(pair["source"], str):
                 raise ValueError(f"{key} 公差來源須為文字")
-        design = cls(data["name"], **groups, tolerances=tolerances, project=project)
+        design = cls(data["name"], **groups, tolerances=tolerances, project=project, trial_result=trial)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
@@ -185,7 +199,7 @@ class Design:
         design = replace(design, boss=replace(design.boss, length=length, width=width, total_height=height,
                                              center_from_left=center[0]+design.copper.base_length/2,
                                              center_from_bottom=center[1]+design.copper.base_width/2),
-                         preform=replace(design.preform, length=length, width=width))
+                         preform=replace(design.preform, length=length, width=width, chamfer=chamfer_for(design.copper.pad_size), trial_delta=.15))
         calculate(design)  # Cross-field physical validation, also used by direct callers.
         return design
 
@@ -249,7 +263,7 @@ def boss_dimensions(d: Design):
 class Result:
     boss_length: float  # I
     boss_width: float  # H
-    boss_total_height: float  # L (CuH), relative to base top
+    boss_total_height: float  # L, relative to base top
     boss_lower_height: float  # L-K
     copper_to_flange: float  # L+D-K, relative to base top
     cavity_volume: float  # V1-1
@@ -266,17 +280,31 @@ class Result:
     boss_center: tuple[float, float]
     copper_base_area: float
     gap_analysis: dict
+    preform_chamfer: float
+    trial_status: str
+    trial_signature: str
+
+
+def trial_signature(d):
+    mapping=d.to_mapping()
+    length,width,height,center=boss_dimensions(d)
+    mapping["boss"].update(length=length,width=width,total_height=height,center_from_left=center[0]+d.copper.base_length/2,center_from_bottom=center[1]+d.copper.base_width/2)
+    if d.pcb.opening_mode=="auto":mapping["pcb"]["opening_length"],mapping["pcb"]["opening_width"]=recommended_opening(d)
+    mapping["preform"]["chamfer"]=chamfer_for(d.copper.pad_size)
+    paths=['package.length','package.width','package.support_height','pcb.opening_length','pcb.opening_width','pcb.thickness','pcb.relief_diameter','copper.base_length','copper.base_width','copper.base_thickness','copper.corner_radius','copper.hole_diameter','copper.hole_edge_offset','copper.pad_size','boss.length','boss.width','boss.total_height','boss.center_from_left','boss.center_from_bottom','stack.lead_solder','stack.board_solder','stack.flange_gap','stack.pad_height','preform.chamfer']
+    return "|".join(f"{path}={mapping[path.split('.')[0]][path.split('.')[1]]:.9f}" for path in paths)+"|holes="+",".join(sorted(d.copper.hole_corners))
 
 
 def calculate(d: Design) -> Result:
     p, b, c, s, t = d.package, d.pcb, d.copper, d.stack, d.preform
+    t=replace(t, chamfer=chamfer_for(c.pad_size), trial_delta=.15)
     recommended = recommended_opening(d)
     if b.opening_mode == "auto":
         b = replace(b, opening_length=recommended[0], opening_width=recommended[1])
     length, width, height, center = boss_dimensions(d)
     gap = height + s.flange_gap - s.pad_height
     if not (height > s.pad_height and gap > height):
-        raise ValueError("高度堆疊無效：CuH 必須大於小凸台高度，flange 必須高於小凸台頂面")
+        raise ValueError("高度堆疊無效：L 必須大於小凸台高度，flange 必須高於小凸台頂面")
     if c.base_thickness not in (2.5, 3.0):
         raise ValueError("規範 G 僅支援 2.5 或 3.0 mm")
     if not (0 < c.corner_radius < min(c.base_length, c.base_width) / 2):
@@ -313,15 +341,20 @@ def calculate(d: Design) -> Result:
         raise ValueError("厚度試作差值過大，最薄試片厚度必須大於零")
     warnings = [
         "銅塊外形 E/F 為使用者輸入，須由 thermal / RF 設計確認；範例 40×30 mm 並非 PDF 規定。",
-        "PDF 第12頁為 Z±0.05 mm，第13頁表格為 ±0.15 mm；本次依輸入 trial_delta 計算。",
+        "試片增減量固定 ±0.15 mm；製造公差另行設定。",
         "依設計尺寸（Typ.）估算的體積未含公差堆疊、焊料損耗及空洞率；最終厚度依切片結果選定。",
     ]
     clearance = (t.chamfer - 2 * c.pad_size) / math.sqrt(2)
-    warnings.append(f"依四角 J×J 凸台與45度削角計算最近距離為 {clearance:.4f} mm；PDF 第11頁約0.37 mm，須確認。")
+    warnings.append("45°削角依小凸台 J 自動計算，最近距離基準固定0.2828 mm；Y取小數第二位。")
     if b.opening_length < recommended[0] or b.opening_width < recommended[1]:
         warnings.append(f"PCB 手動開孔小於 {b.opening_rule.title()} 規則向上進位的建議值 {recommended[0]}×{recommended[1]} mm。")
-    if t.thickness_override is not None:
-        warnings.append("模型採用指定的 thickness_override；計算厚度與三款試片仍另列於報告。")
+    trial=d.trial_result
+    signature=trial_signature(d)
+    index=("lower","middle","upper").index(trial["choice"])
+    valid=trial["locked"] and trial["signature"]==signature and abs(trial["value"]-trials[index])<1e-8
+    state=("locked" if valid else "stale") if trial["locked"] else "unlocked"
+    model=trial["value"] if valid else trials[index]
+    if state=="stale":warnings.append("尺寸已變更；原試驗結果需解鎖並重新驗證。")
     analysis = {"overlap": False, "concentric": True,
                 "assumptions": ["固定設計條件：PA 底座與 PCB 開窗同心。間隙僅依尺寸上下公差計算。",
                                 "未指定的公差暫按零計算，並非零公差製造規格。"]}
@@ -336,9 +369,9 @@ def calculate(d: Design) -> Result:
                                    "BASE_R": c.corner_radius, "HOLE_D": c.hole_diameter,
                                    "HOLE_EDGE": c.hole_edge_offset, "HOLE_MASK": copper_hole_mask(asdict(c))})
     return Result(length, width, height, height - s.pad_height, gap, cavity, boss,
-                  volume, area, z, t.thickness_override if t.thickness_override is not None else z,
+                  volume, area, z, model,
                   trials, recommended, clearance, c.base_thickness + 0.05, tuple(warnings), center,
-                  base_area, analysis)
+                  base_area, analysis, t.chamfer, state, signature)
 
 
 def octagon(length: float, width: float, chamfer: float) -> list[tuple[float, float]]:

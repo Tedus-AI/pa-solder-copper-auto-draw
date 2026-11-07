@@ -23,10 +23,10 @@ def test_pdf_page13_numeric_regression(data):
     assert r.cavity_volume == pytest.approx(134.966, abs=.0005)
     assert r.boss_volume == pytest.approx(67.970, abs=.0005)
     assert r.solder_volume == pytest.approx(66.996, abs=.0005)
-    assert r.preform_area == pytest.approx(178.760)
-    assert r.calculated_thickness == pytest.approx(.3748, abs=.00005)
+    assert r.preform_area == pytest.approx(178.76)
+    assert r.calculated_thickness == pytest.approx(.374779052203)
     assert r.recommended_opening == (20.9, 10.1)
-    assert r.trial_thicknesses == pytest.approx((r.calculated_thickness-.05, r.calculated_thickness, r.calculated_thickness+.05))
+    assert r.trial_thicknesses == pytest.approx((r.calculated_thickness-.15, r.calculated_thickness, r.calculated_thickness+.15))
 
 
 def test_ceiling_without_rounding_down():
@@ -48,8 +48,8 @@ def test_stack_changes_gap_and_volume(data):
     ("package", "length", float("nan")), ("pcb", "thickness", True),
     ("copper", "base_width", 8), ("copper", "pad_size", 4),
     ("copper", "base_thickness", 2.9), ("copper", "hole_edge_offset", 0),
-    ("stack", "flange_gap", .1), ("preform", "chamfer", 3),
-    ("preform", "trial_delta", 1), ("preform", "thickness_override", -1),
+    ("stack", "flange_gap", .1),
+     ("preform", "thickness_override", -1),
     ("pcb", "opening_length", 20), ("preform", "unknown", 1),
 ])
 def test_invalid_inputs_rejected(data, group, field, value):
@@ -94,18 +94,18 @@ def test_no_inferred_base_dimensions(data):
 
 def test_override_changes_model_only(data):
     r1 = calculate(Design.from_mapping(data))
-    data["preform"]["thickness_override"] = .37
+    data["trial_result"] = {"choice":"upper", "locked":False}
     r2 = calculate(Design.from_mapping(data))
-    assert r2.model_thickness == .37
+    assert r2.model_thickness == pytest.approx(r2.calculated_thickness+.15)
     assert r2.calculated_thickness == r1.calculated_thickness
     assert r2.trial_thicknesses == r1.trial_thicknesses
 
 
 def test_trial_conflict_and_clearance_visible(data):
     r = calculate(Design.from_mapping(data))
-    assert r.corner_clearance == pytest.approx(.2828427125)
-    assert any("第13頁" in w for w in r.warnings)
-    assert any("0.37 mm" in w for w in r.warnings)
+    assert r.corner_clearance == pytest.approx(.282842712474619)
+    assert any("0.15" in w for w in r.warnings)
+    assert any("0.2828 mm" in w for w in r.warnings)
 
 
 def test_browser_layout_metadata_roundtrip_preserves_manufacturing_geometry(data):
@@ -188,3 +188,22 @@ def test_boss_offset_must_stay_on_rounded_base_and_away_from_holes(data):
     data["boss"] = {"center_from_left": 38, "center_from_bottom": 15}
     with pytest.raises(ValueError, match="中凸台"):
         Design.from_mapping(data)
+
+
+def test_browser_trial_lock_is_portable_and_invalidated_after_geometry_change(data):
+    import json
+    import subprocess
+    repo = ROOT.parent
+    source = """import{calculate,defaults}from'./web/src/design.js';
+const d=structuredClone(defaults);d.trial_result.choice='upper';const r=calculate(d);
+d.trial_result={choice:'upper',locked:true,value:r.model_thickness,signature:r.trial_signature,confirmed_at:'2026-11-07T00:00:00Z'};
+console.log(JSON.stringify(calculate(d).design));"""
+    exported=json.loads(subprocess.check_output(['node','--input-type=module','-e',source],cwd=repo,text=True))
+    d=Design.from_mapping(exported);r=calculate(d)
+    assert r.trial_status=='locked'
+    assert r.model_thickness==pytest.approx(r.calculated_thickness+.15)
+    assert r.corner_clearance==pytest.approx(.282842712474619)
+    exported['copper']['pad_size']=1.6
+    stale=calculate(Design.from_mapping(exported))
+    assert stale.trial_status=='stale'
+    assert exported['trial_result']['value']==r.model_thickness

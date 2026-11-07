@@ -26,6 +26,6 @@ stack:
   flange_gap: 0.3
   pad_height: 0.15
 preform:
-  chamfer: 3.4
-  trial_delta: 0.05
+  chamfer: 3.40  # 自動：2J + sqrt(2) × 0.2828 mm
+  trial_delta: 0.15  # 固定三款試片增減量
   thickness_override: null

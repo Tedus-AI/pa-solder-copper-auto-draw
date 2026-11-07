@@ -97,7 +97,7 @@ export function drawing(r, part) {
     };
     profile(0, -y - 16, c.base_length, I,bx); profile(x + c.base_width / 2 + 20, -y - 16, c.base_width, H,by);
     notes.push(`COPPER / ${r.design.name} / mm / views 1:1`, `${size('G',g,'copper.base_thickness')}; ${radiusLabel}`, `${diameterLabel} THRU; ${size('C',c.hole_edge_offset,'copper.hole_edge_offset')}`,
-      size('CuH(L)',r.boss_total_height,'boss.total_height'), `${size('J',j,'copper.pad_size',{quantity:4,minDigits:2})}; ${size('K',k,'stack.pad_height',{quantity:4,minDigits:2})}`,
+      size('L',r.boss_total_height,'boss.total_height'), `${size('J',j,'copper.pad_size',{quantity:4,minDigits:2})}; ${size('K',k,'stack.pad_height',{quantity:4,minDigits:2})}`,
       `${size('Xc',bx+x,'boss.center_from_left')}; ${size('Yc',by+y,'boss.center_from_bottom')}`,
       footprint.closed_holes.every(Boolean)?'Mounting holes enclosed by the rounded base.':`Open corner cuts = ${footprint.breakouts}; tool misses = ${footprint.outside_holes}; tangencies = ${footprint.tangent_holes}; profile chord <= ${footprint.chord_tolerance} mm`,
       'Finish: electroless Ni <1.5um; matte Sn 1.5-3.5um', 'E/F require thermal and RF approval', dimension('HSK depth',r.heatsink_depth,{tolerance:'±0.05'}),

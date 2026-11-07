@@ -4,21 +4,21 @@ import { defaults, calculate, ceilTenth, nativeJob, octagon } from '../src/desig
 import { drawing } from '../src/dxf.js';
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b}`);
 
-test('PDF p13 example and volume conservation', () => {
+test('PDF volume subtraction with fixed 0.2828 mm corner clearance', () => {
   const r = calculate(defaults);
   near(r.boss_total_height, .48); near(r.copper_to_flange, .63);
   near(r.boss_volume, 67.9704); near(r.cavity_volume, 134.966, .0005);
-  near(r.preform_area, 178.76); near(r.calculated_thickness, .3748, .00005);
+  near(r.preform_area, 178.76); near(r.calculated_thickness, .374779052203);
   near(r.solder_volume, r.calculated_thickness * r.preform_area);
   assert.deepEqual(r.recommended_opening, [20.9, 10.1]);
   near(r.corner_clearance, .282842712474619);
 });
-test('ceiling and stock thickness override', () => {
+test('ceiling and selected upper trial thickness', () => {
   assert.equal(ceilTenth(20.57), 20.6); assert.equal(ceilTenth(20.6), 20.6); assert.equal(ceilTenth(20.60001), 20.7);
-  const d = structuredClone(defaults); d.preform.thickness_override = .37;
-  const r = calculate(d); assert.equal(r.model_thickness, .37); assert.notEqual(r.calculated_thickness, .37);
+  const d = structuredClone(defaults); d.trial_result.choice = 'upper';
+  const r = calculate(d); near(r.model_thickness,r.calculated_thickness+.15);
 });
-for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'pad_size', 4], ['copper', 'hole_edge_offset', 25], ['stack', 'flange_gap', .1], ['preform', 'chamfer', 3], ['preform', 'trial_delta', 1], ['preform', 'thickness_override', -1]]) {
+for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'pad_size', 4], ['copper', 'hole_edge_offset', 25], ['stack', 'flange_gap', .1], ['preform', 'thickness_override', -1]]) {
   test(`invalid ${group}.${key} rejected`, () => { const d = structuredClone(defaults); d.pcb.opening_mode='manual';d[group][key] = value; assert.throws(() => calculate(d)); });
 }
 test('name and unknown settings rejected', () => {

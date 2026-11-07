@@ -38,7 +38,7 @@ test('downloaded drawing notation retains codes, units and CAD glyphs',()=>{
   const r=calculate(defaults),copper=drawing(r,'copper'),preform=drawing(r,'preform'),layout=layoutDxf(r,layoutGeometry(r));
   assert.ok(copper.includes('E = 40 %%p0.2 mm'));assert.ok(copper.includes('2-%%cD = 3.00 mm'));
   assert.ok(copper.includes('4-R = 3.00 mm'));
-  assert.ok(copper.includes('CuH(L) = 0.48 +0/-0.1 mm'));
+  assert.ok(copper.includes('L = 0.48 +0/-0.1 mm'));
   assert.ok(preform.includes('W = 20.6 %%p0.1 mm'));assert.ok(preform.includes('4-Y = 3.40 +0.2/-0 mm'));
   assert.ok(layout.includes('R = 1 mm'));assert.ok(layout.includes('2-%%cV = 4.00 mm'));
 });

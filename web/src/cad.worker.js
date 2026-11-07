@@ -15,6 +15,7 @@ self.onmessage = async ({ data: { id, design } }) => {
     self.postMessage({ id, status: '正在載入瀏覽器 CAD 引擎…' });
     await ready();
     const r = calculate(design), c = r.design.copper;
+    if(r.trial_status==='stale')throw new Error('尺寸已變更，請解鎖並重新驗證試片厚度。');
     const [cx,cy]=r.boss_center||[0,0];
     self.postMessage({ id, status: '正在建立銅塊與錫片實體…' });
     let copper = keep(sketchRoundedRectangle(c.base_length, c.base_width, c.corner_radius).extrude(c.base_thickness));

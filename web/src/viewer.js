@@ -28,7 +28,7 @@ function dispose(group) {
 export class CADViewer {
   constructor(container,onMode=()=>{},onDimension=()=>{}) {
     this.el=container;this.onMode=onMode;this.onDimension=onDimension;
-    this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:false};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
+    this.transparent={copper:false,preform:false,pcb:true,pa:false,epad:false};this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:false};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
     this.scene=new THREE.Scene();this.camera=createCADCamera();this.camera.position.set(50,-60,50);
     this.target=new THREE.Vector3();this.models=new THREE.Group();this.scene.add(this.models);
     this.overlay=svgNode('svg',{'class':'dimension-overlay','aria-label':'尺寸定位標註'});container.append(this.overlay);
@@ -63,6 +63,7 @@ export class CADViewer {
     if(this.key)this.selectDimension(this.key,false,{tolerance:this.toleranceFocus===this.key});
   }
   mesh(geometry,color,opacity=1,component='copper') {
+    opacity=this.transparent[component==='mask'?'epad':component]? .18:1;
     const makeMaterial=value=>new THREE.MeshStandardMaterial({color:value,roughness:component==='copper'?.34:component==='preform'?.28:.52,metalness:component==='copper'?.64:component==='preform'?.72:component==='pa'?.35:.05,envMapIntensity:1.05,transparent:opacity<1,opacity,depthWrite:opacity>=.9,side:THREE.DoubleSide});
     const mesh=new THREE.Mesh(geometry,Array.isArray(color)?color.map(makeMaterial):makeMaterial(color));
     mesh.castShadow=opacity>=.9&&component!=='pcb';mesh.receiveShadow=true;
@@ -147,6 +148,7 @@ export class CADViewer {
     // Report the components actually present in the scene, including all edge objects.
     this.el.dataset.visibleComponents=[...new Set(this.models.children.map(o=>o.userData.component))].sort().join(',');
     this.el.dataset.copperShades=[...new Set(this.models.children.filter(o=>o.isMesh&&o.userData.component==='copper').flatMap(o=>(Array.isArray(o.material)?[...new Set(o.geometry.groups.map(g=>g.materialIndex))].map(i=>o.material[i]):[o.material]).map(m=>'#'+m.color.getHexString())))].join(',');
+    this.el.dataset.componentOpacities=JSON.stringify(Object.fromEntries(['copper','preform','pcb','pa','epad'].map(k=>[k,[...new Set(this.models.children.filter(o=>o.isMesh&&o.userData.component===k).flatMap(o=>(Array.isArray(o.material)?o.material:[o.material]).map(m=>m.opacity)))]])));
     this.el.dataset.paFeatures=[...new Set(this.models.children.map(o=>o.userData.feature).filter(Boolean))].join(',');
     this.onMode(this.mode,this.refs,this.exploded);
     document.getElementById('viewer-placeholder').hidden=true;
@@ -169,6 +171,7 @@ export class CADViewer {
     this.mode=mode;if(mode==='layout')this.refs.epad=true;this.toleranceFocus=null;this.clearAnnotation();this.key=null;this.renderModels();if(fit)this.setView(mode==='layout'?'top':'iso');
   }
   setReference(component,visible){this.refs[component]=visible;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();}
+  setTransparency(component,value){this.transparent[component]=value;this.renderModels();this.el.dataset.transparentComponents=Object.keys(this.transparent).filter(k=>this.transparent[k]).join(',');}
   setExploded(value){this.exploded=value;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();this.setView('iso');}
   setView(view='iso') {
     this.markView(view);
@@ -224,7 +227,7 @@ export class CADViewer {
     if(['top','bottom','front','back','left','right'].includes(view))this.lastOrthographicView=view;
     document.querySelectorAll('[data-camera-view]').forEach(el=>{if(el.tagName==='BUTTON'){const active=el.dataset.cameraView===view;el.setAttribute('aria-pressed',String(active));el.classList.toggle('active',active);}});
     const orthographic=document.getElementById('view-orthographic');
-    if(orthographic){const active=view!=='iso';orthographic.classList.toggle('active',active);orthographic.setAttribute('aria-pressed',String(active));}
+    if(orthographic){const active=!['iso','iso-bottom','custom'].includes(view);orthographic.classList.toggle('active',active);orthographic.setAttribute('aria-pressed',String(active));}
   }
   clearAnnotation({keepEnvelope=false}={}){this.overlay.replaceChildren();this.activeDimension=null;this.el.dataset.dimension='';delete this.el.dataset.annotationLayout;if(!keepEnvelope){for(const child of [...this.models.children])if(child.userData.annotation==='pa_envelope'){this.models.remove(child);dispose(child);}if(this.worldBounds)this.worldBounds=new THREE.Box3().setFromObject(this.models);}this.onDimension(null);}
   labelWidth(){const measured=this.activeDimension?Math.ceil(this.textMeasure.measureText(this.activeDimension.label).width)+24:116;return Math.max(116,measured,this.activeDimension?.datums&&this.el.clientWidth>=600?150:0);}

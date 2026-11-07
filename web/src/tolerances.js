@@ -14,7 +14,7 @@ export const toleranceDefaults={
   'copper.pad_size':entry(.05,.05,'PPT 第4頁 J ±0.05 mm'),
   'boss.length':entry(.05,.05,'PPT 第4頁 I ±0.05 mm'),
   'boss.width':entry(.05,.05,'PPT 第4頁 H ±0.05 mm'),
-  'boss.total_height':entry(.1,0,'PPT 第4頁 L(CuH) +0/−0.1 mm'),
+  'boss.total_height':entry(.1,0,'PPT 第4頁 L +0/−0.1 mm'),
   'boss.center_from_left':entry(0,0),'boss.center_from_bottom':entry(0,0),
   'stack.lead_solder':entry(0,0),'stack.board_solder':entry(0,0),'stack.flange_gap':entry(0,0),
   'stack.pad_height':entry(.05,.05,'PPT 第4頁 K ±0.05 mm'),

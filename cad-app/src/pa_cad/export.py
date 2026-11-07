@@ -21,6 +21,8 @@ from .creo import prepare_job, TARGET
 
 def export_bundle(d: Design, output: str | Path) -> Path:
     r = calculate(d)
+    if r.trial_status=="stale":
+        raise ValueError("尺寸已變更，請解鎖並重新驗證試片厚度")
     parent = Path(output)
     parent.mkdir(parents=True, exist_ok=True)
     target = parent / d.name

@@ -1,4 +1,5 @@
 import { defaultTolerances, toleranceDefaults, getTolerance, dimensionRange } from './tolerances.js';
+import {chamferFor,TRIAL_DELTA,trialChoices,emptyTrial,trialState} from './preform-rules.js';
 import {holeCorners,holeMask} from './hole-corners.js';
 import { copperFootprint, roundedBaseDistance } from './copper-geometry.js';
 
@@ -10,9 +11,10 @@ export const defaults = {
   copper:{base_length:40,base_width:30,base_thickness:3,corner_radius:3,hole_diameter:3,hole_edge_offset:4,hole_corners:['bottom_left','top_right'],pad_size:1.5},
   boss:{length:20.6,width:9.8,total_height:.48,center_from_left:20,center_from_bottom:15,size_mode:'auto',height_mode:'auto'},
   stack:{lead_solder:.1,board_solder:.1,flange_gap:.3,pad_height:.15},
-  preform:{length:20.6,width:9.8,chamfer:3.4,trial_delta:.05,thickness_override:null},
+  preform:{length:20.6,width:9.8,chamfer:chamferFor(1.5),trial_delta:TRIAL_DELTA,thickness_override:null},
   layout:{border_width:1,epad_size:1.5,web_width:.3,hole_clearance:4},
   tolerances:defaultTolerances(),
+  trial_result:emptyTrial(),
 };
 export const fields={
   package:['PA 封裝',{length:'PA 長度',width:'PA 寬度',support_height:'支撐高度 SPH'}],
@@ -20,7 +22,7 @@ export const fields={
   copper:['銅塊',{base_length:'基座長度 E',base_width:'基座寬度 F',base_thickness:'基座厚度 G',corner_radius:'四角半徑 R',hole_diameter:'吊掛孔徑 D',hole_edge_offset:'孔中心距邊 C',pad_size:'小凸台邊長 J'}],
   boss:['中凸台／小凸台',{length:'中凸台長度 I',width:'中凸台寬度 H',total_height:'中凸台總高 L',center_from_left:'中心距左邊 Xc',center_from_bottom:'中心距下邊 Yc'}],
   stack:['高度堆疊',{lead_solder:'引腳下錫厚 A',board_solder:'銅塊／PCB 錫厚 B',flange_gap:'PA 至中凸台 D',pad_height:'小凸台高度 K'}],
-  preform:['錫片設計',{length:'錫片長度 W',width:'錫片寬度 X',chamfer:'45° 削角 Y',trial_delta:'試片厚度增減量',thickness_override:'指定錫厚 Z（留空自動）'}],
+  preform:['錫片設計',{length:'錫片長度 W',width:'錫片寬度 X',chamfer:'45° 削角 Y',trial_delta:'試片厚度增減量',thickness_override:'選定錫厚 Z'}],
   layout:['綠漆／E-PAD',{border_width:'外框綠漆 R',epad_size:'E-PAD 邊長 S',web_width:'格間綠漆 T',hole_clearance:'定位孔避讓 V'}],
 };
 const zero=new Set(['max_tolerance','lead_solder','board_solder','flange_gap','trial_delta','center_from_left','center_from_bottom']);
@@ -62,6 +64,11 @@ export function normalize(input){
       check(typeof value==='number'&&Number.isFinite(value)&&value<=10000&&(zero.has(key)?value>=0:value>0),`${fields[group][1][key]||key} 的數值無效。`);
     }
   }
+  const record=input.trial_result??emptyTrial();
+  check(record&&typeof record==='object'&&!Array.isArray(record)&&Object.keys(record).every(k=>Object.hasOwn(emptyTrial(),k)),'試片驗證記錄格式無效。');
+  d.trial_result={...emptyTrial(),...record};
+  check(trialChoices.includes(d.trial_result.choice)&&typeof d.trial_result.locked==='boolean','試片選項或鎖定狀態無效。');
+  if(d.trial_result.locked)check(typeof d.trial_result.value==='number'&&Number.isFinite(d.trial_result.value)&&d.trial_result.value>0&&typeof d.trial_result.signature==='string'&&typeof d.trial_result.confirmed_at==='string','已鎖定的試片須包含尺寸、設計記錄與驗證時間。');
   const supplied=input.tolerances??{};check(supplied&&typeof supplied==='object'&&!Array.isArray(supplied),'公差須為設定物件。');
   for(const[key,pair]of Object.entries(supplied)){
     check(Object.hasOwn(toleranceDefaults,key),`未知公差：${key}`);
@@ -83,7 +90,7 @@ export function normalize(input){
   if(d.pcb.opening_mode==='auto')[d.pcb.opening_length,d.pcb.opening_width]=openingRecommendation(d).rounded;
   if(d.boss.size_mode==='auto'){d.boss.length=ceilTenth(d.package.length);d.boss.width=ceilTenth(d.package.width);}
   d.boss.total_height=d.pcb.thickness+d.stack.lead_solder+d.stack.board_solder-d.package.support_height-d.stack.flange_gap+d.stack.pad_height;
-  d.preform.length=d.boss.length;d.preform.width=d.boss.width;
+  d.preform.length=d.boss.length;d.preform.width=d.boss.width;d.preform.chamfer=chamferFor(d.copper.pad_size);d.preform.trial_delta=TRIAL_DELTA;
   return d;
 }
 export function gapAnalysis(d){
@@ -115,7 +122,7 @@ export function calculate(input){
   check(volume>0&&area>0,'體積扣除後錫量或錫片面積非正值。');const z=volume/area;
   check(z-t.trial_delta>0,'試作厚度差值過大，最薄試片須大於零。');
   const openingChain=openingRecommendation(d),clearance=(t.chamfer-2*c.pad_size)/Math.SQRT2,analysis=gapAnalysis(d);
-  const warnings=['銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。','未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。','PDF 第12頁為 Z ±0.05 mm，第13頁表格為 ±0.15 mm；試片增減量與 Z 製造公差 ±0.02 mm 分開。',`削角與小凸台的解析最近距離為 ${clearance.toFixed(4)} mm，與 PDF 第11頁約0.37 mm 不同。`,'錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。'];
+  const warnings=['銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。','未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。','試片增減量固定 ±0.15 mm；錫片製造公差 ±0.02 mm 另行設定。','錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。'];
   if(footprint.breakouts)warnings.push('吊掛孔已穿破圓角／外緣；預覽與出圖保留實際缺口。');
   if(footprint.outside_holes)warnings.push('有吊掛孔刀具圓未切到圓角基座，實際模型不會出現該孔。');
   if(footprint.tangent_holes)warnings.push('孔與基座外形恰好相接；顯示實際輪廓，出圖仍會驗證單一實體。');
@@ -124,11 +131,12 @@ export function calculate(input){
   if(I+getTolerance(d,'boss.length').plus>b.opening_length-getTolerance(d,'pcb.opening_length').minus||H+getTolerance(d,'boss.width').plus>b.opening_width-getTolerance(d,'pcb.opening_width').minus)warnings.push('中凸台最大尺寸大於 PCB 最小開孔，公差極限下凸台可能與開孔干涉。');
   if(b.opening_length<openingChain.rounded[0]||b.opening_width<openingChain.rounded[1])warnings.push(`手動開孔小於 ${b.opening_rule} 規則建議值 ${openingChain.rounded.join(' × ')} mm。`);
   if(q.size_mode==='manual')warnings.push('中凸台 I/H 使用手動設計尺寸（Typ.）；錫片 W/X 跟隨中凸台。');
-  if(t.thickness_override!==null)warnings.push('模型使用指定錫厚，計算厚度與試片另外列出。');
+  const trial=trialState(d,z);t.thickness_override=trial.model;
+  if(trial.status==='stale')warnings.push('設計尺寸已變更：已記錄的試驗結果需解鎖並重新驗證。');
   const ranges={};for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names)){const value=key==='thickness_override'?t.thickness_override??z:d[group][key];ranges[`${group}.${key}`]=dimensionRange(d,`${group}.${key}`,value);}
   return{design:d,boss_length:I,boss_width:H,boss_total_height:L,boss_lower_height:L-s.pad_height,boss_center:center,
-    copper_to_flange:gap,cavity_volume:cavity,boss_volume:boss,solder_volume:volume,preform_area:area,calculated_thickness:z,model_thickness:t.thickness_override??z,
-    trial_thicknesses:[z-t.trial_delta,z,z+t.trial_delta],recommended_opening:openingChain.rounded,opening_chain:openingChain,corner_clearance:clearance,heatsink_depth:c.base_thickness+.05,
+    copper_to_flange:gap,cavity_volume:cavity,boss_volume:boss,solder_volume:volume,preform_area:area,calculated_thickness:z,model_thickness:trial.model,trial_status:trial.status,trial_signature:trial.signature,
+    trial_thicknesses:trial.trials,recommended_opening:openingChain.rounded,opening_chain:openingChain,corner_clearance:clearance,heatsink_depth:c.base_thickness+.05,
     copper_base_area:footprint.area,copper_volume:footprint.area*c.base_thickness+boss,hole_breakouts:footprint.breakouts,hole_tangencies:footprint.tangent_holes,gap_analysis:analysis,dimension_ranges:ranges,
     pa_envelope:{min_length:ranges['package.length'].min,max_length:ranges['package.length'].max,min_width:ranges['package.width'].min,max_width:ranges['package.width'].max},warnings};
 }

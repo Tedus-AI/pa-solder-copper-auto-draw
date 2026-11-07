@@ -48,8 +48,7 @@ with st.form("design"):
                         values[group][field] = st.number_input(
                             label, value=float(defaults[group][field]), step=.01, format="%.4f", key=f"{group}.{field}"
                         )
-    use_override = st.checkbox("使用已選定的錫片厚度（覆寫模型厚度，不改變計算報告）")
-    override = st.number_input("指定錫片厚度", value=.37, step=.01, format="%.4f")
+    trial_choice = st.selectbox("試片厚度選擇", ["middle", "lower", "upper"])
     use_yaml = st.checkbox("改用進階 YAML 輸入（優先於上方欄位）")
     with st.expander("進階 YAML／批次流程參數"):
         yaml_text = st.text_area("YAML 設計參數", yaml.safe_dump(defaults, sort_keys=False), height=280)
@@ -65,7 +64,7 @@ def mesh(solid):
 if submitted:
     st.session_state.pop("generated", None)
     try:
-        values["preform"]["thickness_override"] = override if use_override else None
+        values["trial_result"] = {"choice": trial_choice, "locked": False, "value": None, "signature": None, "confirmed_at": None}
         design = Design.from_mapping(yaml.safe_load(yaml_text) if use_yaml else values)
         result = calculate(design)
         with st.spinner("建立實體、驗證 STEP 並產生 DXF…"):
@@ -85,7 +84,7 @@ if submitted:
 if generated := st.session_state.get("generated"):
     r = generated["result"]
     cols = st.columns(4)
-    for col, label, value in zip(cols, ["銅塊 CuH", "錫片計算厚度 Z", "模型錫厚", "所需錫量"],
+    for col, label, value in zip(cols, ["中凸台總高 L", "錫片計算厚度 Z", "模型錫厚", "所需錫量"],
                                  [f"{r['boss_total_height']:.4f} mm", f"{r['calculated_thickness']:.6f} mm",
                                   f"{r['model_thickness']:.6f} mm", f"{r['solder_volume']:.4f} mm³"]):
         col.metric(label, value)

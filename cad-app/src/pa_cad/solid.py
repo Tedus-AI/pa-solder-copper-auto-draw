@@ -30,7 +30,7 @@ def copper_block(d: Design, r: Result) -> cq.Workplane:
 
 
 def solder_preform(d: Design, r: Result) -> cq.Workplane:
-    return (cq.Workplane("XY").polyline(octagon(r.boss_length, r.boss_width, d.preform.chamfer))
+    return (cq.Workplane("XY").polyline(octagon(r.boss_length, r.boss_width, r.preform_chamfer))
             .close().extrude(r.model_thickness))
 
 
