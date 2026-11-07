@@ -51,5 +51,5 @@ export function formatDimension(name,value,{prefix='',tolerance='',digits=4,minD
 export function dimensionLabel(dimension) {
   const spec=dimensionSpecs[dimension.key];
   if(!spec)throw new Error(`Missing dimension notation: ${dimension.key}`);
-  return formatDimension(spec.name,dimension.value,{...spec,tolerance:dimension.toleranceSuffix||''});
+  return formatDimension(spec.name,dimension.value,{...spec,...(dimension.quantity?{quantity:dimension.quantity}:{}),tolerance:dimension.toleranceSuffix||''});
 }

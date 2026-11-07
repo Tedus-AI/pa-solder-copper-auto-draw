@@ -1,4 +1,5 @@
 import clipping from 'polygon-clipping';
+import {holeCenters} from './hole-corners.js';
 
 // Manufacturing preview/profile precision. Volume integration below uses the
 // analytic arcs, not the chord approximation used for drawing the profile.
@@ -51,7 +52,7 @@ function removedArea(c,centers,radius){
     }
     for(const sx of[-1,1])for(const sy of[-1,1])breaks.push(...circleIntersectionXs(center,radius,[sx*(x-R),sy*(y-R)],R));
   }
-  breaks.push(...circleIntersectionXs(centers[0],radius,centers[1],radius));
+  for(let i=0;i<centers.length;i++)for(let j=i+1;j<centers.length;j++)breaks.push(...circleIntersectionXs(centers[i],radius,centers[j],radius));
   const points=[...new Set(breaks.filter(v=>v>=-x&&v<=x))].sort((a,b)=>a-b);
   const lengthAt=px=>{
     const ax=Math.abs(px),dy=ax<=x-R?R:Math.sqrt(Math.max(0,R*R-(ax-x+R)**2)),half=y-R+dy;
@@ -73,15 +74,15 @@ function removedArea(c,centers,radius){
 
 export function copperFootprint(c){
   const outer=copperRoundedRectangle(c.base_length,c.base_width,c.corner_radius),radius=c.hole_diameter/2;
-  const centers=[-1,1].map(sign=>[sign*(c.base_length/2-c.hole_edge_offset),sign*(c.base_width/2-c.hole_edge_offset)]);
+  const centers=holeCenters(c);
   const holes=centers.map(([x,y])=>copperCircle(x,y,radius));
   const profile=clipping.difference(outer,...holes);
   const signedDistances=centers.map(([x,y])=>roundedBaseDistance(x,y,c));
   const closed_holes=signedDistances.map(distance=>distance<-radius-1e-8);
   const hole_conditions=signedDistances.map(distance=>distance<-radius-1e-8?'enclosed':Math.abs(distance+radius)<=1e-8?'tangent_inside':distance>radius+1e-8?'outside':Math.abs(distance-radius)<=1e-8?'tangent_outside':'breakout');
   const outer_area=c.base_length*c.base_width-(4-Math.PI)*c.corner_radius**2;
-  const separate=Math.hypot(centers[1][0]-centers[0][0],centers[1][1]-centers[0][1])>=2*radius;
-  const removed=closed_holes.every(Boolean)&&separate?2*Math.PI*radius**2:removedArea(c,centers,radius);
+  const separate=centers.every((a,i)=>centers.slice(i+1).every(b=>Math.hypot(a[0]-b[0],a[1]-b[1])>=2*radius));
+  const removed=closed_holes.every(Boolean)&&separate?centers.length*Math.PI*radius**2:removedArea(c,centers,radius);
   const coords=profile.flatMap(poly=>poly[0]);
   const bounds=coords.length?coords.reduce((b,[x,y])=>({minX:Math.min(b.minX,x),maxX:Math.max(b.maxX,x),minY:Math.min(b.minY,y),maxY:Math.max(b.maxY,y)}),{minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity}):null;
   return {outer,holes,centers,profile,area:Math.max(0,outer_area-removed),outer_area,removed_area:removed,bounds,closed_holes,hole_conditions,

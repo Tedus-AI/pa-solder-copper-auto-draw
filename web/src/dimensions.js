@@ -1,3 +1,4 @@
+import {holeCenters} from './hole-corners.js';
 import { dimensionSpecs, formatDimension } from './dimension-format.js';
 import { getTolerance, toleranceSuffix, toleranceText, toleranceSource } from './tolerances.js';
 export { dimensionLabel } from './dimension-format.js';
@@ -5,10 +6,10 @@ export { dimensionLabel } from './dimension-format.js';
 export function referenceLevels(r){const d=r.design,base=d.copper.base_thickness;return{base,boss:base+r.boss_lower_height,pad:base+r.boss_total_height,pcbBottom:base+d.stack.board_solder,pcbTop:base+d.stack.board_solder+d.pcb.thickness,flange:base+r.copper_to_flange,lead:base+r.copper_to_flange+d.package.support_height};}
 export function dimensionFor(key,r,layout){
  const d=r.design,c=d.copper,p=d.package,b=d.pcb,l=d.layout,z=referenceLevels(r),I=r.boss_length,H=r.boss_width,[cx,cy]=r.boss_center||[0,0];
- const hx=c.base_length/2-c.hole_edge_offset,hy=c.base_width/2-c.hole_edge_offset,padX=(I-c.pad_size)/2,padY=(H-c.pad_size)/2;
+ const centers=holeCenters(c),[hx,hy]=centers.at(-1),padX=(I-c.pad_size)/2,padY=(H-c.pad_size)/2;
  const pinX=4.445*p.length/20.57,pinY=-Math.min(p.width/2+4.83*p.width/9.78-.2,Math.max(p.width/2+.5,b.opening_width/2+.5));
  const radiusCandidates=[[1,1],[1,-1],[-1,1],[-1,-1]].flatMap(([sx,sy])=>[45,30,60,15,75].map(degrees=>{const a=[sx*(c.base_length/2-c.corner_radius),sy*(c.base_width/2-c.corner_radius),z.base],angle=degrees*Math.PI/180;return{a,b:[a[0]+sx*c.corner_radius*Math.cos(angle),a[1]+sy*c.corner_radius*Math.sin(angle),z.base]};}));
- const visibleRadiusCandidates=radiusCandidates.filter(candidate=>[-1,1].every(sign=>Math.hypot(candidate.b[0]-sign*hx,candidate.b[1]-sign*hy)>c.hole_diameter/2+1e-6));
+ const visibleRadiusCandidates=radiusCandidates.filter(candidate=>centers.every(([x,y])=>Math.hypot(candidate.b[0]-x,candidate.b[1]-y)>c.hole_diameter/2+1e-6));
  const radiusDatum=visibleRadiusCandidates[0]||radiusCandidates[0];
  const candidates=layout?.cells.filter(cell=>cell.full)||[],cell=candidates.find(cell=>candidates.some(other=>Math.abs(other.y-cell.y)<1e-6&&Math.abs(other.x-cell.x-layout.pitch)<1e-6))||candidates[0]||{x:cx,y:cy+b.opening_width/2+2};
  const v=(a,b,mode,value,note='',offset=[0,0,1.5])=>({a,b,mode,value,note,offset,key});
@@ -25,7 +26,7 @@ export function dimensionFor(key,r,layout){
  'copper.base_thickness':()=>v([c.base_length/2,0,0],[c.base_length/2,0,z.base],'copper',c.base_thickness,'基座厚度 G'),
  'copper.corner_radius':()=>v(radiusDatum.a,radiusDatum.b,'copper',c.corner_radius,'圓角半徑 R：外側單箭頭指向有效圓弧，尺寸文字沿斜引線標示'),
  'copper.hole_diameter':()=>v([hx-c.hole_diameter/2,hy,z.base],[hx+c.hole_diameter/2,hy,z.base],'copper',c.hole_diameter,'吊掛孔徑 D；孔徑大於角部肉厚時顯示實際破邊'),
- 'copper.hole_edge_offset':()=>v([hx,hy,z.base],[c.base_length/2,hy,z.base],'copper',c.hole_edge_offset,'孔中心至基座直邊基準 C，與圓角 R 獨立'),
+ 'copper.hole_edge_offset':()=>v([hx,hy,z.base],[Math.sign(hx)*c.base_length/2,hy,z.base],'copper',c.hole_edge_offset,'孔中心至基座直邊基準 C，與圓角 R 獨立'),
  'copper.pad_size':()=>v([padX-c.pad_size/2,padY-c.pad_size/2,z.pad],[padX+c.pad_size/2,padY-c.pad_size/2,z.pad],'copper',c.pad_size,'四角小凸台邊長 J'),
  'boss.length':()=>v([-I/2,-H/2,z.boss],[I/2,-H/2,z.boss],'copper',I,'中凸台長度 I；自動時依 PA 設計長度（Typ.）向上取至 0.1 mm'),
  'boss.width':()=>v([I/2,-H/2,z.boss],[I/2,H/2,z.boss],'copper',H,'中凸台寬度 H'),
@@ -51,7 +52,7 @@ export function dimensionFor(key,r,layout){
  if(relative){dimension.a=movePoint(dimension.a);dimension.b=movePoint(dimension.b);}
  dimension.kind=dimensionSpecs[key]?.kind||'linear';dimension.view=key==='package.support_height'?'right':Math.abs(dimension.b[2]-dimension.a[2])>1e-8?'front':'top';
  if(key==='copper.corner_radius')dimension.radiusCandidates=visibleRadiusCandidates;
- if(['copper.hole_diameter','layout.hole_clearance'].includes(key))dimension.diameterCenters=[1,-1].map(sign=>[sign*hx,sign*hy,z.base]);
+ if(['copper.hole_diameter','layout.hole_clearance'].includes(key)){dimension.diameterCenters=centers.map(([x,y])=>[x,y,z.base]);dimension.quantity=centers.length;}
  if(key==='pcb.relief_diameter')dimension.diameterCenters=[[1,1],[1,-1],[-1,1],[-1,-1]].map(([sx,sy])=>[cx+sx*b.opening_length/2,cy+sy*(b.opening_width/2-b.relief_diameter/2),z.pcbTop]);
  dimension.tolerance=getTolerance(d,key);dimension.toleranceSuffix=toleranceSuffix(d,key);dimension.toleranceSource=toleranceSource(d,key);
  dimension.toleranceLabel=`${dimensionSpecs[key]?.name||key} 公差 = ${toleranceText(d,key)}`;

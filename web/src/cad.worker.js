@@ -1,6 +1,7 @@
 import initOpenCascade from 'replicad-opencascadejs';
 import wasmURL from 'replicad-opencascadejs/wasm?url';
 import { setOC, sketchRoundedRectangle, sketchRectangle, makeCylinder, Sketcher, measureVolume, importSTEP } from 'replicad';
+import {holeCenters} from './hole-corners.js';
 import { calculate, octagon } from './design.js';
 
 let engine;
@@ -17,8 +18,8 @@ self.onmessage = async ({ data: { id, design } }) => {
     const [cx,cy]=r.boss_center||[0,0];
     self.postMessage({ id, status: '正在建立銅塊與錫片實體…' });
     let copper = keep(sketchRoundedRectangle(c.base_length, c.base_width, c.corner_radius).extrude(c.base_thickness));
-    for (const sign of [-1, 1]) {
-      const hole = keep(makeCylinder(c.hole_diameter / 2, c.base_thickness, [sign * (c.base_length / 2 - c.hole_edge_offset), sign * (c.base_width / 2 - c.hole_edge_offset), 0]));
+    for (const [hx,hy] of holeCenters(c)) {
+      const hole = keep(makeCylinder(c.hole_diameter / 2, c.base_thickness, [hx,hy,0]));
       copper = keep(copper.cut(hole));
     }
     const boss = keep(sketchRectangle(r.boss_length, r.boss_width, { origin: [cx,cy,c.base_thickness] }).extrude(r.boss_lower_height));

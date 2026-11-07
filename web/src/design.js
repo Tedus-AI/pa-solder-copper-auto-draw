@@ -1,4 +1,5 @@
 import { defaultTolerances, toleranceDefaults, getTolerance, dimensionRange } from './tolerances.js';
+import {holeCorners,holeMask} from './hole-corners.js';
 import { copperFootprint, roundedBaseDistance } from './copper-geometry.js';
 
 export const defaults = {
@@ -6,7 +7,7 @@ export const defaults = {
   project:{name:'未命名專案',pa_model:'H-37248KC-6/2'},
   package:{length:20.57,width:9.78,max_tolerance:.127,support_height:1.57},
   pcb:{opening_length:20.9,opening_width:10.1,thickness:2,relief_diameter:2,opening_mode:'auto',opening_rule:'delta'},
-  copper:{base_length:40,base_width:30,base_thickness:3,corner_radius:3,hole_diameter:3,hole_edge_offset:4,pad_size:1.5},
+  copper:{base_length:40,base_width:30,base_thickness:3,corner_radius:3,hole_diameter:3,hole_edge_offset:4,hole_corners:['bottom_left','top_right'],pad_size:1.5},
   boss:{length:20.6,width:9.8,total_height:.48,center_from_left:20,center_from_bottom:15,size_mode:'auto',height_mode:'auto'},
   stack:{lead_solder:.1,board_solder:.1,flange_gap:.3,pad_height:.15},
   preform:{length:20.6,width:9.8,chamfer:3.4,trial_delta:.05,thickness_override:null},
@@ -55,6 +56,7 @@ export function normalize(input){
     for(const key of Object.keys(values))check(Object.hasOwn(d[group],key)||(group==='pcb'&&['placement_accuracy','opening_tolerance'].includes(key)),`未知欄位：${group}.${key}`);
     for(const key of Object.keys(d[group]))if(Object.hasOwn(values,key))d[group][key]=values[key];
     for(const[key,value]of Object.entries(d[group])){
+      if(group==='copper'&&key==='hole_corners'){check(Array.isArray(value)&&value.length>=1&&value.length<=4&&new Set(value).size===value.length&&value.every(k=>Object.hasOwn(holeCorners,k)),'吊掛孔請選擇一至四個不同角位。');continue;}
       if(group==='pcb'&&['opening_mode','opening_rule'].includes(key)||group==='boss'&&['size_mode','height_mode'].includes(key))continue;
       if(key==='thickness_override'&&value===null)continue;
       check(typeof value==='number'&&Number.isFinite(value)&&value<=10000&&(zero.has(key)?value>=0:value>0),`${fields[group][1][key]||key} 的數值無效。`);
@@ -132,4 +134,4 @@ export function calculate(input){
 }
 export function octagon(l,w,c){const x=l/2,y=w/2;return[[-x+c,-y],[x-c,-y],[x,-y+c],[x,y-c],[x-c,y],[-x+c,y],[-x,y-c],[-x,-y+c]];}
 export function nativeJob(r){const d=r.design,c=d.copper;return{schema_version:2,status:'awaiting_local_creo_execution',target:{product:'Creo Parametric',version:'7.0.10.0',os:'Windows 11'},name:d.name,units:'mm',required_model_type:'native_parametric_features',step_import_acceptable:false,design:d,derived:r,
- native_parameters:{copper:{BASE_L:c.base_length,BASE_W:c.base_width,BASE_T:c.base_thickness,BASE_R:c.corner_radius,HOLE_D:c.hole_diameter,HOLE_EDGE:c.hole_edge_offset,BOSS_L:r.boss_length,BOSS_W:r.boss_width,CUH:r.boss_total_height,PAD_SIZE:c.pad_size,PAD_H:d.stack.pad_height,BOSS_X:r.boss_center[0],BOSS_Y:r.boss_center[1]},preform:{PREFORM_L:r.boss_length,PREFORM_W:r.boss_width,CHAMFER_Y:d.preform.chamfer,PREFORM_Z:r.model_thickness}},required_features:{copper:['BASE_EXTRUDE','BASE_ROUNDS','MOUNT_HOLES','MAIN_BOSS','CORNER_PADS'],preform:['PREFORM_EXTRUDE']},expected:{copper:{volume:r.copper_volume,bounds:[c.base_length,c.base_width,c.base_thickness+r.boss_total_height]},preform:{volume:r.preform_area*r.model_thickness,bounds:[r.boss_length,r.boss_width,r.model_thickness]}},note:'Native parametric masters with boss offset parameters and actual licensed Creo execution are required. The website does not generate native PRT files.'};}
+ native_parameters:{copper:{BASE_L:c.base_length,BASE_W:c.base_width,BASE_T:c.base_thickness,BASE_R:c.corner_radius,HOLE_D:c.hole_diameter,HOLE_EDGE:c.hole_edge_offset,...(holeMask(c)!==9?{HOLE_MASK:holeMask(c)}:{}),BOSS_L:r.boss_length,BOSS_W:r.boss_width,CUH:r.boss_total_height,PAD_SIZE:c.pad_size,PAD_H:d.stack.pad_height,BOSS_X:r.boss_center[0],BOSS_Y:r.boss_center[1]},preform:{PREFORM_L:r.boss_length,PREFORM_W:r.boss_width,CHAMFER_Y:d.preform.chamfer,PREFORM_Z:r.model_thickness}},required_features:{copper:['BASE_EXTRUDE','BASE_ROUNDS','MOUNT_HOLES','MAIN_BOSS','CORNER_PADS'],preform:['PREFORM_EXTRUDE']},expected:{copper:{volume:r.copper_volume,bounds:[c.base_length,c.base_width,c.base_thickness+r.boss_total_height]},preform:{volume:r.preform_area*r.model_thickness,bounds:[r.boss_length,r.boss_width,r.model_thickness]}},note:'Native parametric masters with boss offset parameters and actual licensed Creo execution are required. The website does not generate native PRT files.'};}

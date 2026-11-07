@@ -43,7 +43,7 @@ export function drawing(r, part) {
   const notes = [];
   if (part === 'copper') {
     const x = c.base_length / 2, y = c.base_width / 2, R = c.corner_radius, b = Math.tan(Math.PI / 8);
-    const footprint=copperFootprint(c),separate=Math.hypot(footprint.centers[0][0]-footprint.centers[1][0],footprint.centers[0][1]-footprint.centers[1][1])>c.hole_diameter+1e-8;
+    const footprint=copperFootprint(c),separate=footprint.centers.every((a,i)=>footprint.centers.slice(i+1).every(b=>Math.hypot(a[0]-b[0],a[1]-b[1])>c.hole_diameter+1e-8));
     if(footprint.closed_holes.every(Boolean)&&separate){
       poly([[-x + R, -y], [x - R, -y, b], [x, -y + R], [x, y - R, b], [x - R, y], [-x + R, y, b], [-x, y - R], [-x, -y + R, b]]);
       for(const[hx,hy]of footprint.centers)entity('CIRCLE','HOLES','AcDbCircle',10,hx,20,hy,30,0,40,c.hole_diameter/2);
@@ -61,7 +61,7 @@ export function drawing(r, part) {
     dim([-x,by],[bx,by],-y-5,size('Xc',bx+x,'boss.center_from_left'));
     dim([bx,-y],[bx,by],-x-10,size('Yc',by+y,'boss.center_from_bottom'),true);
     const radiusLabel=size('R',R,'copper.corner_radius',{quantity:4,minDigits:2});
-    const diameterLabel=size('D',c.hole_diameter,'copper.hole_diameter',{quantity:2,featureSymbol:'⌀',prefix:'',minDigits:2});
+    const diameterLabel=size('D',c.hole_diameter,'copper.hole_diameter',{quantity:footprint.centers.length,featureSymbol:'⌀',prefix:'',minDigits:2});
     // Put the radius arrow on an actual surviving arc. A broken drilling cut
     // can remove the first corner, in which case the adjacent upper arc is used.
     const candidates=[[1,1],[-1,1],[1,-1],[-1,-1]].map(([sx,sy])=>{
@@ -83,11 +83,11 @@ export function drawing(r, part) {
     for(const center of footprint.centers)centerMark(center,c.hole_diameter/2);
     // A horizontal diametral line through the nearby upper hole avoids the
     // separate upper radius leader and the H dimension below it.
-    const hole=footprint.centers[1],radius=c.hole_diameter/2,diameterA=[hole[0]-radius,hole[1]],diameterB=[hole[0]+radius,hole[1]],outside=c.hole_diameter<2;
+    const hole=footprint.centers.at(-1),radius=c.hole_diameter/2,diameterA=[hole[0]-radius,hole[1]],diameterB=[hole[0]+radius,hole[1]],outside=c.hole_diameter<2;
     line(diameterA,diameterB);arrow(diameterA,[outside?-1:1,0],Math.min(.8,Math.max(.4,radius*.4)));arrow(diameterB,[outside?1:-1,0],Math.min(.8,Math.max(.4,radius*.4)));
     if(outside)line([diameterA[0]-1,diameterA[1]],[diameterB[0]+1,diameterB[1]]);
-    const knee=[x+3,hole[1]],shelf=Math.max(8,diameterLabel.replaceAll('%%c','⌀').replaceAll('%%p','±').length*.48);
-    line(diameterB,knee);line(knee,[knee[0]+shelf,knee[1]]);text(diameterLabel,knee[0]+.2,knee[1]+.7,.85,'DIM');
+    const sx=Math.sign(hole[0]),knee=[sx*(x+3),hole[1]],shelf=Math.max(8,diameterLabel.replaceAll('%%c','⌀').replaceAll('%%p','±').length*.48);
+    line(sx>0?diameterB:diameterA,knee);line(knee,[knee[0]+sx*shelf,knee[1]]);text(diameterLabel,knee[0]+(sx>0?.2:-shelf),knee[1]+.7,.85,'DIM');
     const g = c.base_thickness, low = r.boss_lower_height, k = r.design.stack.pad_height, j = c.pad_size;
     const profile = (cx, baseline, base, boss,offset) => {
       const e = base / 2, w = boss / 2,center=cx+offset;

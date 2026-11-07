@@ -1,5 +1,7 @@
 """Millimetre DXF views, dimensions and manufacturing notes."""
 from __future__ import annotations
+from .creo import mounting_centers, copper_hole_mask
+from dataclasses import asdict
 
 import math
 from decimal import Decimal
@@ -75,8 +77,10 @@ def _round_feature_dimensions(msp, d, x, y, hx, hy):
     remain reference geometry even when a hole becomes an open corner cut.
     """
     c = d.copper
+    centers = mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))})
+    hx, hy = centers[-1]
     hole_radius = c.hole_diameter/2
-    for px, py in [(-hx, -hy), (hx, hy)]:
+    for px, py in mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))}):
         reach = hole_radius+1
         for start, end in [((px-reach, py), (px+reach, py)),
                            ((px, py-reach), (px, py+reach))]:
@@ -87,9 +91,9 @@ def _round_feature_dimensions(msp, d, x, y, hx, hy):
     # The upper-right hole has a short diagonal leader into clear space
     # beyond the plan. It stays below the overall E dimension at y+5.
     diameter = msp.add_diameter_dim(center=(hx, hy), radius=hole_radius,
-                                    location=(x+3, y+3),
+                                    location=(math.copysign(x+3,hx), math.copysign(y+3,hy)),
                                     text=_feature_text(d, "copper.hole_diameter", "D",
-                                                       c.hole_diameter, 2, "%%c"),
+                                                       c.hole_diameter, len(c.hole_corners), "%%c"),
                                     override=style, dxfattribs={"layer": "DIM"})
     diameter.render()
     # ezdxf's user-location renderer draws only the near half of an outside
@@ -102,7 +106,7 @@ def _round_feature_dimensions(msp, d, x, y, hx, hy):
         point = (center[0]+sx*c.corner_radius/math.sqrt(2),
                  center[1]+sy*c.corner_radius/math.sqrt(2))
         if any(math.hypot(point[0]-px, point[1]-py) <= hole_radius+1e-6
-               for px, py in [(-hx, -hy), (hx, hy)]):
+               for px, py in mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))})):
             continue
         # Only the outside radial leader is visible. The center is retained
         # in the native DIMENSION definition, without a center-to-arc line.
@@ -142,10 +146,10 @@ def write_copper(d: Design, r: Result, path: Path):
            (-x,y-rad,0), (-x,-y+rad,bulge)]
     hx, hy = x - c.hole_edge_offset, y - c.hole_edge_offset
     contained = all(rounded_boundary_distance(xx, yy, c.base_length, c.base_width, rad)+c.hole_diameter/2 <= 1e-10
-                    for xx, yy in [(-hx, -hy), (hx, hy)])
+                    for xx, yy in mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))}))
     if contained:
         msp.add_lwpolyline(pts, format="xyb", close=True, dxfattribs={"layer": "OUTLINE"})
-        for point in [(-hx,-hy), (hx,hy)]:
+        for point in mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))}):
             msp.add_circle(point, c.hole_diameter/2, dxfattribs={"layer": "HOLES"})
     else:
         # Deliver the actual cut silhouette; full circles would falsely close
@@ -153,7 +157,7 @@ def write_copper(d: Design, r: Result, path: Path):
         import cadquery as cq
         base = (cq.Workplane("XY").rect(c.base_length, c.base_width).extrude(c.base_thickness)
                 .edges("|Z").fillet(rad))
-        holes = cq.Workplane("XY").pushPoints([(-hx, -hy), (hx, hy)]).circle(c.hole_diameter/2).extrude(c.base_thickness)
+        holes = cq.Workplane("XY").pushPoints(mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))})).circle(c.hole_diameter/2).extrude(c.base_thickness)
         bottom = base.cut(holes).faces("<Z").val()
         outer = bottom.outerWire()
         for wire in bottom.Wires():
@@ -169,8 +173,9 @@ def write_copper(d: Design, r: Result, path: Path):
     _dim(msp, (-x,-y), (-x,y), (-x-5,0), 90, "F = <>"+_tol(d,"copper.base_width")+" mm")
     _dim(msp, (bx-r.boss_length/2,by), (bx+r.boss_length/2,by), (0,y+2), text="I = <>"+_tol(d,"boss.length")+" mm")
     _dim(msp, (bx,by-r.boss_width/2), (bx,by+r.boss_width/2), (x+5,0), 90, "H = <>"+_tol(d,"boss.width")+" mm")
-    _dim(msp, (hx,hy), (x,hy), (0,y+9), text="C = <>"+_tol(d,"copper.hole_edge_offset")+" mm")
-    _dim(msp, (hx,hy), (hx,y), (x+10,0), 90, "C = <>"+_tol(d,"copper.hole_edge_offset")+" mm")
+    hx, hy = mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))})[-1]
+    _dim(msp, (hx,hy), (math.copysign(x,hx),hy), (0,y+9), text="C = <>"+_tol(d,"copper.hole_edge_offset")+" mm")
+    _dim(msp, (hx,hy), (hx,math.copysign(y,hy)), (x+10,0), 90, "C = <>"+_tol(d,"copper.hole_edge_offset")+" mm")
     _dim(msp, (-x,by), (bx,by), (0,-y-6), text="Boss datum X = <> mm")
     _dim(msp, (bx,-y), (bx,by), (x+14,0), 90, "Boss datum Y = <> mm")
     _round_feature_dimensions(msp, d, x, y, hx, hy)
@@ -188,7 +193,7 @@ def write_copper(d: Design, r: Result, path: Path):
         f"{d.name} / COPPER BLOCK / mm / design dimensions (Typ.)",
         f"E = {c.base_length:g}{_tol(d,'copper.base_length')} mm; F = {c.base_width:g}{_tol(d,'copper.base_width')} mm",
         f"G = {c.base_thickness:g}{_tol(d,'copper.base_thickness')} mm; "+_feature_text(d,"copper.corner_radius","R",c.corner_radius,4),
-        _feature_text(d,"copper.hole_diameter","D",c.hole_diameter,2,"%%c")+f" THRU; C = {c.hole_edge_offset:g}{_tol(d,'copper.hole_edge_offset')} mm",
+        _feature_text(d,"copper.hole_diameter","D",c.hole_diameter,len(c.hole_corners),"%%c")+f" THRU; C = {c.hole_edge_offset:g}{_tol(d,'copper.hole_edge_offset')} mm",
         f"I = {r.boss_length:g}{_tol(d,'boss.length')} mm; H = {r.boss_width:g}{_tol(d,'boss.width')} mm",
         f"L(CuH) = {r.boss_total_height:.4f}{_tol(d,'boss.total_height')} mm above base top",
         f"4X J = {c.pad_size:g}{_tol(d,'copper.pad_size')} mm; K = {d.stack.pad_height:g}{_tol(d,'stack.pad_height')} mm",

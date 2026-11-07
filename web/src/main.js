@@ -117,6 +117,8 @@ for(const group of uiGroups){
     grid.append(row);
   }
   details.append(grid);
+  if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表 ↗';details.append(button);}
+  if(group.id==='copper'){const box=document.createElement('fieldset');box.className='hole-selection';box.innerHTML='<legend>吊掛孔角位（俯視，可複選）</legend>'+[['top_left','左上'],['top_right','右上'],['bottom_left','左下'],['bottom_right','右下']].map(([key,label])=>`<label><input type="checkbox" data-hole-corner="${key}">${label}</label>`).join('');details.append(box);}
   if(group.id==='pcb'){
     const links=document.createElement('div');links.className='linked-controls';links.innerHTML='<label><input id="pcb-auto" type="checkbox" checked>開窗 M/N 自動計算</label><select id="pcb-rule" aria-label="PCB 開窗設計規則"><option value="delta">Delta</option><option value="ampleon">Ampleon</option></select><p id="opening-chain"></p>';details.append(links);
     const analysis=document.createElement('div');analysis.id='gap-analysis';analysis.className='gap-analysis';
@@ -166,6 +168,7 @@ function formValues(){
       d.tolerances[path][sign]=raw===''?0:Number(raw);
     }
   }
+  d.copper.hole_corners=[...document.querySelectorAll('[data-hole-corner]:checked')].map(e=>e.dataset.holeCorner);
   d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
   d.boss.size_mode=$('boss-size-auto').checked?'auto':'manual';d.boss.height_mode='auto';
   return d;
@@ -174,6 +177,7 @@ function fill(d){
   projectMetadataValid=true;$('name').value=d.name;
   $('project-name').value=d.project?.name??d.name??'未命名專案';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
+  document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
   $('boss-size-auto').checked=d.boss.size_mode==='auto';
   tolerancesUnlocked=false;updateToleranceLock();syncLinkedFields(d);
@@ -196,7 +200,7 @@ function status(text){$('status').textContent=text;}
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
 function layoutFor(r){
   const c=r.design.copper,b=r.design.pcb;
-  const key=JSON.stringify([c.base_length,c.base_width,c.corner_radius,c.hole_diameter,c.hole_edge_offset,b.opening_length,b.opening_width,b.relief_diameter,r.boss_center,r.design.layout]);
+  const key=JSON.stringify([c.base_length,c.base_width,c.corner_radius,c.hole_diameter,c.hole_edge_offset,c.hole_corners,b.opening_length,b.opening_width,b.relief_diameter,r.boss_center,r.design.layout]);
   if(key!==layoutKey){cachedLayout=layoutGeometry(r);layoutKey=key;}return cachedLayout;
 }
 function refreshPreview(showError=false){
@@ -311,7 +315,7 @@ function renderMetrics(r){
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
   const maximum=r.pa_envelope?[r.pa_envelope.max_length,r.pa_envelope.max_width]:r.opening_chain.maximum;
   $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append('；');$('package-derived').append(formatDimension(index?'PA(Wmax)':'PA(Lmax)',value));formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
-  $('copper-derived').textContent=formatDimension('HSK 槽深',r.heatsink_depth,{tolerance:'±0.05'});formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');$('copper-derived').append('；孔位由兩相鄰外邊定位');
+  $('copper-derived').textContent=formatDimension('HSK 槽深',r.heatsink_depth,{tolerance:'±0.05'});formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');
   $('stack-derived').textContent=`L = C + 0.1 + 0.1 − SPH − 0.3 + K = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
   $('boss-derived').textContent=`中凸台下段高 = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(`；中凸台總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
   $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} ${formatDimension('M',r.recommended_opening[0])}；${formatDimension('N',r.recommended_opening[1])}（${r.design.pcb.opening_rule==='delta'?'Delta':'Ampleon'}）`;
@@ -342,7 +346,7 @@ function renderFormulaHelp(r){
   setFormula('boss.center_from_left',`Xc 是從基座左外邊到中凸台中心的手動定位尺寸。\n按「置中」時計算 Xc = E / 2 = ${f(c.base_length)} / 2 = ${f(c.base_length/2)} mm。\n目前 Xc = ${f(d.boss.center_from_left)} mm；相對基座中心偏移 = ${f(r.boss_center[0])} mm。`);
   setFormula('boss.center_from_bottom',`Yc 是從基座下外邊到中凸台中心的手動定位尺寸。\n按「置中」時計算 Yc = F / 2 = ${f(c.base_width)} / 2 = ${f(c.base_width/2)} mm。\n目前 Yc = ${f(d.boss.center_from_bottom)} mm；相對基座中心偏移 = ${f(r.boss_center[1])} mm。`);
   setFormula('boss-lower',`中凸台下段高度 = L − K\n= ${f(r.boss_total_height)} − ${f(s.pad_height)} = ${f(r.boss_lower_height)} mm。`);
-  setFormula('hsk-depth',`在 HSK（散熱器）對應銅塊的位置加工凹槽，容納銅塊基座。\n槽深設計值 = 銅塊基座厚度 G + 0.05 mm\n= ${f(c.base_thickness)} + 0.05 = ${f(r.heatsink_depth)} mm。\n此 HSK 槽深的加工公差為 ±0.05 mm；允許深度 ${f(r.heatsink_depth-.05)}～${f(r.heatsink_depth+.05)} mm。\n來源：PDF 第3頁。這是 HSK 凹槽的尺寸，銅塊厚度 G 仍依其本身的公差。`);
+  setFormula('hsk-depth',`在 HSK（散熱器）對應銅塊的位置加工凹槽，容納銅塊基座。\n槽深設計值 = 銅塊基座厚度 G + 0.05 mm\n= ${f(c.base_thickness)} + 0.05 = ${f(r.heatsink_depth)} mm。\n此 HSK 槽深的加工公差為 ±0.05 mm；允許深度 ${f(r.heatsink_depth-.05)}～${f(r.heatsink_depth+.05)} mm。`);
   const cavity=`V₁₋₁ = [M × N + π × (O / 2)²] × (L + D − K)\n= [${f(b.opening_length)} × ${f(b.opening_width)} + π × (${f(b.relief_diameter)} / 2)²] × ${f(r.copper_to_flange)} = ${f(r.cavity_volume)} mm³\n依 PPT 第12頁的等效體積公式。`;
   const boss=`V₂ = I × H × (L − K) + 4 × J² × K\n= ${f(r.boss_length)} × ${f(r.boss_width)} × ${f(r.boss_lower_height)} + 4 × ${f(c.pad_size)}² × ${f(s.pad_height)} = ${f(r.boss_volume)} mm³。`;
   const volume=`V₁ = V₁₋₁ − V₂\n= ${f(r.cavity_volume)} − ${f(r.boss_volume)} = ${f(r.solder_volume)} mm³。`;

@@ -188,3 +188,18 @@ def test_positioned_boss_and_corner_breakout_dxf_matches_actual_outline(tmp_path
     hy = d.copper.base_width/2-d.copper.hole_edge_offset
     assert all(((point.x-sign*hx)**2+(point.y-sign*hy)**2)**.5 > d.copper.hole_diameter/2
                for sign in (-1, 1))
+
+@pytest.mark.parametrize('corners',[['top_left'],['bottom_right'],['bottom_left','top_right','top_left','bottom_right']])
+def test_selected_corner_solids_and_native_contract(tmp_path,corners):
+    from pa_cad.creo import prepare_job, validate_job
+    d0=Design.load(EXAMPLE).to_mapping();d0['copper']['hole_corners']=corners
+    d=Design.from_mapping(d0);r=calculate(d);solid=copper_block(d,r)
+    assert len(solid.solids().vals())==1
+    assert solid.val().isValid()
+    assert abs(solid.val().Volume()-expected_copper_volume(d,r))<1e-6
+    target=tmp_path/'copper.dxf';write_copper(d,r,target)
+    doc=ezdxf.readfile(target);assert len(list(doc.modelspace().query('CIRCLE')))==len(corners)
+    assert not doc.audit().errors
+    from dataclasses import asdict
+    job=prepare_job(d.to_mapping(),asdict(r),{'copper':solid.val().Volume(),'preform':r.preform_area*r.model_thickness})
+    validate_job(job)

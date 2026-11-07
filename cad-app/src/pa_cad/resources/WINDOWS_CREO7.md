@@ -106,3 +106,5 @@ runner 的自動檢查仍不能取代以下人工驗收：實際 Creo完整版�
 ## API 核對來源
 
 本 runner 的 request／response 格式已對照 [CREOSON 官方原始碼](https://github.com/SimplifiedLogic/creoson)，參考提交 `c5ddd28149f345a717de387f9ddc1e0e5428468a` 的 JSON specs 與 Java help：`connection.connect`、`creo.set_creo_version`、`file.open/rename/regenerate/backup/erase`、`feature.list`、`parameter.set/list`、`geometry.bound_box` 等。這是介面核對，不是該第三方發行包與 Creo 7.0.10.0／Windows 11 的實機相容性認證。
+
+四角孔位：選擇原預設對角以外的配置時，銅塊原生母檔須增加 `HOLE_MASK` 整數參數，並透過 Pro/PROGRAM 控制 MOUNT_HOLES 群組中的四個獨立孔特徵。俯視左下=1、右下=2、左上=4、右上=8，選取值相加；預設9、全選15。所有孔共用 HOLE_D／HOLE_EDGE。缺少新參數的母檔會停止執行，須先更新母檔再於 Creo 驗證孔位再生。

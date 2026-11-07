@@ -1,5 +1,7 @@
 """Exact B-rep solids; never rename STEP output to pretend it is Creo PRT."""
 from __future__ import annotations
+from .creo import mounting_centers, copper_hole_mask
+from dataclasses import asdict
 
 import cadquery as cq
 
@@ -11,7 +13,7 @@ def copper_block(d: Design, r: Result) -> cq.Workplane:
     base = (cq.Workplane("XY").rect(c.base_length, c.base_width)
             .extrude(c.base_thickness).edges("|Z").fillet(c.corner_radius))
     hx, hy = c.base_length / 2 - c.hole_edge_offset, c.base_width / 2 - c.hole_edge_offset
-    holes = (cq.Workplane("XY").pushPoints([(-hx, -hy), (hx, hy)])
+    holes = (cq.Workplane("XY").pushPoints(mounting_centers({"BASE_L":c.base_length,"BASE_W":c.base_width,"HOLE_EDGE":c.hole_edge_offset,"HOLE_MASK":copper_hole_mask(asdict(c))}))
              .circle(c.hole_diameter / 2).extrude(c.base_thickness))
     base = base.cut(holes)
     bx, by = r.boss_center

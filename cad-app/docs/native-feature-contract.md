@@ -6,7 +6,7 @@
 
 | 零件 | 必要特徵 |
 |---|---|
-| `copper.prt` | 具尺寸約束的基座草繪、基座擠出、四角圓角、兩個對角通孔、大凸台草繪／擠出、四角小凸台（個別或陣列） |
+| `copper.prt` | 具尺寸約束的基座草繪、基座擠出、四角圓角、依所選角位的一至四個通孔、大凸台草繪／擠出、四角小凸台（個別或陣列） |
 | `preform.prt` | 具尺寸約束的四角45°削角八邊形草繪、厚度擠出 |
 
 所有模型均以 mm 建立；底面／中心基準採既有設計規則。母檔方案可接受，但母檔必須有上述原生特徵，不能是匯入的單一 STEP 實體。
@@ -19,7 +19,7 @@
 |---|---|
 | `BASE_L` / `BASE_W` / `BASE_T` | 銅塊外形 E/F/G |
 | `BASE_R` | 四角半徑 |
-| `HOLE_D` / `HOLE_EDGE` | 對角孔直徑及距相鄰兩邊的中心距 |
+| `HOLE_D` / `HOLE_EDGE` | 吊掛孔直徑及距相鄰兩邊的中心距 |
 | `PA_L` / `PA_W` / `SPH` | PA 設計長／寬（Typ.）及支撐高度 |
 | `PCB_L` / `PCB_W` / `PCB_T` | PCB 開孔及板厚 |
 | `RELIEF_D` | 體積公式中的 relief 直徑 |
@@ -45,3 +45,7 @@
 7. 儲存後關閉、重新開啟 PRT，再驗證原生特徵、尺寸與單位；將實際 Creo 版本與驗證結果附於交付報告。
 
 目前這些 Creo 驗收均尚未執行；現有 STEP 回讀與軟體測試不能替代它們。
+
+### Selectable mounting corners
+
+`copper.hole_corners` lists one to four of `bottom_left`, `bottom_right`, `top_left`, `top_right`, viewed from +Z. Missing values retain bottom-left/top-right. Alternate selections add the integer `HOLE_MASK` parameter: bits 1, 2, 4, 8 respectively. The default mask is 9; all four is 15. The native master must expose this parameter and use Pro/PROGRAM conditions to include the matching individual hole features inside MOUNT_HOLES. Each included hole uses the existing HOLE_D and HOLE_EDGE dimensions. An older master lacking HOLE_MASK is rejected for alternate selections, rather than generating an incorrect diagonal pair. Actual native regeneration still requires the licensed Creo machine and validation of feature presence.

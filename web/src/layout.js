@@ -102,13 +102,13 @@ export function layoutDxf(r,g=layoutGeometry(r)) {
   for(const[x,y]of g.centers)centerMark(x,y,Math.max(l.hole_clearance,r.design.copper.hole_diameter)/2);
   const [cx,cy]=g.origin||[0,0],o=r.design.pcb.relief_diameter/2;
   for(const sx of[-1,1])for(const sy of[-1,1])centerMark(cx+sx*r.design.pcb.opening_length/2,cy+sy*(r.design.pcb.opening_width/2-o),o);
-  const vLabel=dimension('V',l.hole_clearance,'layout.hole_clearance',{quantity:2,featureSymbol:'⌀',prefix:'',minDigits:2});
-  const hole=g.centers[1],vr=l.hole_clearance/2,dir=[1/Math.SQRT2,1/Math.SQRT2],a=[hole[0]-dir[0]*vr,hole[1]-dir[1]*vr],b=[hole[0]+dir[0]*vr,hole[1]+dir[1]*vr],outside=l.hole_clearance<2;
+  const vLabel=dimension('V',l.hole_clearance,'layout.hole_clearance',{quantity:g.centers.length,featureSymbol:'⌀',prefix:'',minDigits:2});
+  const hole=g.centers.at(-1),vr=l.hole_clearance/2,dir=[Math.sign(hole[0])/Math.SQRT2,Math.sign(hole[1])/Math.SQRT2],a=[hole[0]-dir[0]*vr,hole[1]-dir[1]*vr],b=[hole[0]+dir[0]*vr,hole[1]+dir[1]*vr],outside=l.hole_clearance<2;
   line(a,b);arrow(a,outside?dir.map(v=>-v):dir);arrow(b,outside?dir:dir.map(v=>-v));
   if(outside)line([a[0]-dir[0],a[1]-dir[1]],[b[0]+dir[0],b[1]+dir[1]]);
-  const knee=[r.design.copper.base_length/2+l.border_width+3,r.design.copper.base_width/2+l.border_width+3],shelf=Math.max(8,vLabel.replaceAll('%%c','⌀').replaceAll('%%p','±').length*.45);
-  line(b,knee);line(knee,[knee[0]+shelf,knee[1]]);
-  put(0,'TEXT',100,'AcDbEntity',8,'DIM',100,'AcDbText',10,knee[0]+.2,20,knee[1]+.7,30,0,40,.8,1,vLabel,100,'AcDbText');
+  const sx=Math.sign(hole[0]),sy=Math.sign(hole[1]),knee=[sx*(r.design.copper.base_length/2+l.border_width+3),sy*(r.design.copper.base_width/2+l.border_width+3)],shelf=Math.max(8,vLabel.replaceAll('%%c','⌀').replaceAll('%%p','±').length*.45);
+  line(b,knee);line(knee,[knee[0]+sx*shelf,knee[1]]);
+  put(0,'TEXT',100,'AcDbEntity',8,'DIM',100,'AcDbText',10,knee[0]+(sx>0?.2:-shelf),20,knee[1]+.7,30,0,40,.8,1,vLabel,100,'AcDbText');
   const notes=[`LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,`SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
     [['R',l.border_width,'layout.border_width'],['S',l.epad_size,'layout.epad_size'],['T',l.web_width,'layout.web_width'],['Pitch',g.pitch]].map(([name,value,key])=>dimension(name,value,key)).join('; '),
     `U = PCB window: ${dimension('M',r.design.pcb.opening_length,'pcb.opening_length')}; ${dimension('N',r.design.pcb.opening_width,'pcb.opening_width')}`,

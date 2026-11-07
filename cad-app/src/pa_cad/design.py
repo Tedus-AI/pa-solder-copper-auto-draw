@@ -39,6 +39,7 @@ class Copper:
     corner_radius: float = 3.0
     hole_diameter: float = 3.0
     hole_edge_offset: float = 4.0
+    hole_corners: tuple = ("bottom_left", "top_right")
     pad_size: float = 1.5
 
 
@@ -136,6 +137,10 @@ class Design:
                 raise ValueError(f"{name} 欄位不完整或不支援: {exc}") from exc
             for f in fields(group):
                 value = getattr(group, f.name)
+                if name == 'copper' and f.name == 'hole_corners':
+                    if not isinstance(value, (list, tuple)) or not 1 <= len(value) <= 4 or any(not isinstance(k,str) or k not in ('bottom_left','bottom_right','top_left','top_right') for k in value) or len(set(value)) != len(value):
+                        raise ValueError('吊掛孔請選擇一至四個不同角位')
+                    continue
                 if name == "boss" and f.name in {"size_mode", "height_mode"}:
                     if value not in {"auto", "manual"}:
                         raise ValueError(f"boss.{f.name} 不支援此設定")
@@ -292,8 +297,9 @@ def calculate(d: Design) -> Result:
                                     c.base_length, c.base_width, c.corner_radius) > 1e-8
            for sx in (-1, 1) for sy in (-1, 1)):
         raise ValueError("中凸台超出銅塊圓角基座範圍")
-    for sign in (-1, 1):
-        if math.hypot(max(abs(sign*hx-center[0])-length/2, 0), max(abs(sign*hy-center[1])-width/2, 0)) <= rad:
+    from .creo import mounting_centers, copper_hole_mask
+    for hx, hy in mounting_centers({"BASE_L": c.base_length, "BASE_W": c.base_width, "HOLE_EDGE": off, "HOLE_MASK": copper_hole_mask(asdict(c))}):
+        if math.hypot(max(abs(hx-center[0])-length/2, 0), max(abs(hy-center[1])-width/2, 0)) <= rad:
             raise ValueError("吊掛孔與中凸台相交")
     cavity = (b.opening_length * b.opening_width + math.pi * (b.relief_diameter / 2) ** 2) * gap
     boss = length * width * (height - s.pad_height) + 4 * c.pad_size**2 * s.pad_height
@@ -328,7 +334,7 @@ def calculate(d: Design) -> Result:
         analysis["overlap"] |= analysis[axis]["min"] < 0
     base_area = rounded_base_area({"BASE_L": c.base_length, "BASE_W": c.base_width,
                                    "BASE_R": c.corner_radius, "HOLE_D": c.hole_diameter,
-                                   "HOLE_EDGE": c.hole_edge_offset})
+                                   "HOLE_EDGE": c.hole_edge_offset, "HOLE_MASK": copper_hole_mask(asdict(c))})
     return Result(length, width, height, height - s.pad_height, gap, cavity, boss,
                   volume, area, z, t.thickness_override if t.thickness_override is not None else z,
                   trials, recommended, clearance, c.base_thickness + 0.05, tuple(warnings), center,

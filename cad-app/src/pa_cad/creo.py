@@ -40,8 +40,18 @@ def rounded_boundary_distance(x, y, length, width, radius):
     return math.hypot(max(qx, 0), max(qy, 0))+min(max(qx, qy), 0)-radius
 
 
+HOLE_KEYS = ('bottom_left', 'bottom_right', 'top_left', 'top_right')
+
+def mounting_centers(params):
+    hx, hy = params['BASE_L']/2-params['HOLE_EDGE'], params['BASE_W']/2-params['HOLE_EDGE']
+    mask = int(params.get('HOLE_MASK', 9))
+    return [(sx*hx, sy*hy) for i, (sx, sy) in enumerate([(-1,-1),(1,-1),(-1,1),(1,1)]) if mask & (1 << i)]
+
+def copper_hole_mask(c):
+    return sum(1 << HOLE_KEYS.index(key) for key in c.get('hole_corners', ['bottom_left','top_right']))
+
 def rounded_base_area(params):
-    """Rounded base minus the actual union of its two corner-hole cuts.
+    """Rounded base minus the actual union of its selected corner-hole cuts.
 
     Contained holes retain the exact closed form. Breakouts integrate true
     circular sections; this stdlib implementation also ships with the runner.
@@ -49,11 +59,11 @@ def rounded_base_area(params):
     length, width, radius = params["BASE_L"], params["BASE_W"], params["BASE_R"]
     rad, off = params["HOLE_D"]/2, params["HOLE_EDGE"]
     hx, hy = length/2-off, width/2-off
-    centers = [(-hx, -hy), (hx, hy)]
+    centers = mounting_centers(params)
     outer = length*width-(4-math.pi)*radius**2
     if (all(rounded_boundary_distance(x, y, length, width, radius)+rad <= 1e-10 for x, y in centers)
-            and math.hypot(2*hx, 2*hy) >= 2*rad):
-        return outer-2*math.pi*rad**2
+            and all(math.dist(a,b)>=2*rad for i,a in enumerate(centers) for b in centers[i+1:])):
+        return outer-len(centers)*math.pi*rad**2
 
     def section(x):
         dx = max(abs(x)-(length/2-radius), 0)
@@ -106,6 +116,8 @@ def prepare_job(design: dict, derived: dict, volumes: dict) -> dict:
                           "CUH": derived["boss_total_height"], "PAD_SIZE": c["pad_size"], "PAD_H": s["pad_height"]},
               "preform": {"PREFORM_L": derived["boss_length"], "PREFORM_W": derived["boss_width"],
                            "CHAMFER_Y": design["preform"]["chamfer"], "PREFORM_Z": derived["model_thickness"]}}
+    if copper_hole_mask(c) != 9:
+        native["copper"]["HOLE_MASK"] = copper_hole_mask(c)
     if "boss" in design or "boss_center" in derived:
         center = derived.get("boss_center")
         if center is None:
@@ -134,7 +146,7 @@ def validate_job(job: dict):
         params = job.get("native_parameters", {}).get(part, {})
         allowed = [PARAMETERS[part]]
         if part == "copper":
-            allowed.append(PARAMETERS[part] | POSITION_PARAMETERS)
+            allowed.extend([PARAMETERS[part] | POSITION_PARAMETERS, PARAMETERS[part] | {"HOLE_MASK"}, PARAMETERS[part] | POSITION_PARAMETERS | {"HOLE_MASK"}])
         if set(params) not in allowed:
             raise CreoError(f"{part}: incorrect native parameter contract.")
         expected = job.get("expected", {}).get(part, {})
@@ -159,14 +171,16 @@ def validate_job(job: dict):
             or not 2*c["PAD_SIZE"] < p["CHAMFER_Y"] < min(p["PREFORM_L"], p["PREFORM_W"])/2
             or p["PREFORM_L"] != c["BOSS_L"] or p["PREFORM_W"] != c["BOSS_W"]):
         raise CreoError("Inconsistent native geometry.")
+    if "HOLE_MASK" in c and (c["HOLE_MASK"] != int(c["HOLE_MASK"]) or not 1 <= c["HOLE_MASK"] <= 15):
+        raise CreoError("Invalid mounting hole mask.")
     hx, hy = c["BASE_L"]/2-c["HOLE_EDGE"], c["BASE_W"]/2-c["HOLE_EDGE"]
     bx, by = c.get("BOSS_X", 0), c.get("BOSS_Y", 0)
     if any(rounded_boundary_distance(bx+sx*c["BOSS_L"]/2, by+sy*c["BOSS_W"]/2,
                                     c["BASE_L"], c["BASE_W"], c["BASE_R"]) > 1e-8
            for sx in (-1, 1) for sy in (-1, 1)):
         raise CreoError("Main boss extends outside the rounded base.")
-    for sign in (-1, 1):
-        if math.hypot(max(abs(sign*hx-bx)-c["BOSS_L"]/2, 0), max(abs(sign*hy-by)-c["BOSS_W"]/2, 0)) <= c["HOLE_D"]/2:
+    for hx, hy in mounting_centers(c):
+        if math.hypot(max(abs(hx-bx)-c["BOSS_L"]/2, 0), max(abs(hy-by)-c["BOSS_W"]/2, 0)) <= c["HOLE_D"]/2:
             raise CreoError("Mounting holes intersect the main boss.")
     copper_volume = native_copper_volume(c)
     volume = {"copper": copper_volume,
