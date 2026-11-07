@@ -49,7 +49,7 @@ export class CADViewer {
       this.scene.add(new THREE.HemisphereLight(0xf6fbff,0x9a7e60,1.55));
       for(const[position,intensity,color]of[[[30,-42,65],3.2,0xffefdb],[[-40,15,30],1.2,0xdcecff],[[15,50,25],1.5,0xffffff]]){const light=new THREE.DirectionalLight(color,intensity);light.position.set(...position);this.scene.add(light);if(!this.keyLight){this.keyLight=light;light.castShadow=true;light.shadow.mapSize.set(1024,1024);light.shadow.bias=-.0001;light.shadow.normalBias=.035;}}
       const ground=new THREE.Mesh(new THREE.PlaneGeometry(240,240),new THREE.ShadowMaterial({color:0x34413a,opacity:.18}));ground.position.z=-.14;ground.receiveShadow=true;this.scene.add(ground);
-      const grid=new THREE.GridHelper(100,20,0xcbd6c6,0xe3e8dd);grid.rotation.x=Math.PI/2;grid.position.z=-.15;this.scene.add(grid);
+      this.grid=new THREE.GridHelper(100,20,0xcbd6c6,0xe3e8dd);this.grid.rotation.x=Math.PI/2;this.grid.position.z=-.15;this.scene.add(this.grid);this.setGridVisible(true);
       new ResizeObserver(()=>{const {width,height}=container.getBoundingClientRect();if(width&&height){this.renderer.setSize(width,height);this.fitCamera();}}).observe(container);
       const animate=()=>{
         requestAnimationFrame(animate);
@@ -171,6 +171,7 @@ export class CADViewer {
     this.mode=mode;if(mode==='layout')this.refs.epad=true;this.toleranceFocus=null;this.clearAnnotation();this.key=null;this.renderModels();if(fit)this.setView(mode==='layout'?'top':'iso');
   }
   setReference(component,visible){this.refs[component]=visible;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();}
+  setGridVisible(visible){if(this.grid)this.grid.visible=visible;this.el.dataset.gridVisible=String(this.grid?.visible??false);}
   setTransparency(component,value){this.transparent[component]=value;this.renderModels();this.el.dataset.transparentComponents=Object.keys(this.transparent).filter(k=>this.transparent[k]).join(',');}
   setExploded(value){this.exploded=value;this.key=null;this.toleranceFocus=null;this.clearAnnotation();this.renderModels();this.setView('iso');}
   setView(view='iso') {

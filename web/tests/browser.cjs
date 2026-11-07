@@ -32,6 +32,13 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#viewer').getAttribute('data-ready'), 'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-parts'), 'pcb,pa');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-opening'), 'true');
+    assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.22 mm','中：0.37 mm','上：0.52 mm']);
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.37');
+    await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-selection.png')});
+    const gridOn=await page.locator('#viewer canvas').screenshot();
+    await page.locator('#view-grid').click();assert.equal(await page.locator('#view-grid').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'false');
+    const gridOff=await page.locator('#viewer canvas').screenshot({path:path.join(output,'grid-hidden.png')});assert.notDeepEqual(gridOff,gridOn,'Grid toggle must change the rendered background');
+    await page.locator('#view-iso-bottom').click();assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'false');await page.locator('#view-iso').click();await page.locator('#view-grid').click();assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'true');assert.equal(await page.locator('#download-zip').isDisabled(),false);
     assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight+1));
     await page.screenshot({path:path.join(output,'initial-desktop.png'),fullPage:true});
     const panelFit=await page.locator('#fields').evaluate(e=>({scroll:e.scrollHeight,visible:e.clientHeight,groups:[...e.children].map(g=>({group:g.dataset.group,height:g.getBoundingClientRect().height}))}));
@@ -80,8 +87,13 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.equal(await page.locator('#guide-section svg').getAttribute('data-scale-x'),await page.locator('#guide-section svg').getAttribute('data-scale-z'));
     for(const mode of ['cavity','copper','solder','all']){await page.locator(`[data-guide-layer=${mode}]`).click();assert.equal(await page.locator('#guide-volume-3d').getAttribute('data-volume'),mode);await page.locator('.guide-geometry').screenshot({path:path.join(output,`volume-${mode}.png`)});}
     assert.equal(await page.locator('details[data-group=preform] #calculation-guide-open').count(),1);
-    assert.equal(await page.locator('.guide-table tbody tr').count(),13);
-    for(const key of ['pcb.opening_length','h','copper.pad_size','preform.chamfer','preform.trial_delta']){await page.locator(`[data-guide-dimension="${key}"]`).click();assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-dimension'),key);}
+    assert.equal(await page.locator('.guide-table tbody tr').count(),12);
+    assert.equal(await page.locator('[data-guide-dimension="preform.trial_delta"]').count(),0);
+    const guideDimensions=await page.locator('[data-guide-dimension]').evaluateAll(els=>els.map(el=>el.dataset.guideDimension));
+    for(const key of guideDimensions){await page.locator(`[data-guide-dimension="${key}"]`).click();assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-dimension'),key);const component=key==='h'?'cavity':key.startsWith('pcb.')?'pcb':key.startsWith('preform.')?'preform':'copper';assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-visible-components'),component,'Only the selected physical component may remain visible');if(['pcb.opening_length','boss.total_height','preform.chamfer'].includes(key))await page.locator('.guide-inspector').screenshot({path:path.join(output,`inspector-${component}.png`)});}
+    assert.equal(await page.locator('.guide-dimension-overlay circle').first().evaluate(e=>getComputedStyle(e).animationName),'none');
+    await page.waitForTimeout(300);const staticInspector=await page.locator('#guide-dimension-3d').screenshot();await page.waitForTimeout(350);assert.deepEqual(await page.locator('#guide-dimension-3d').screenshot(),staticInspector,'Dimension inspector must remain static with no mesh or marker breathing');
+    await page.locator('#guide-dimension-reset').click();assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-visible-components'),'preform');
     if(shardIndex===0){
       await page.locator('#guide-section-zoom').evaluate(e=>{e.value='6';e.dispatchEvent(new Event('input'));});
       for(const[width,height]of[[1366,768],[2560,1440],[1920,900]]){await page.setViewportSize({width,height});await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));const box=await page.locator('#calculation-guide').evaluate(e=>({w:e.clientWidth,h:e.clientHeight,sw:e.scrollWidth,sh:e.scrollHeight}));assert.deepEqual(box,{w:width,h:height,sw:width,sh:height});assert.ok(await page.locator('#guide-section svg').evaluate(svg=>{const v=svg.viewBox.baseVal;return [...svg.querySelectorAll('.guide-fixed-labels text,.guide-fixed-labels path')].every(e=>{const b=e.getBBox();return b.x>=-1&&b.y>=-1&&b.x+b.width<=v.width+1&&b.y+b.height<=v.height+1;});}),'Zoomed section leaders must stay inside the view');await page.screenshot({path:path.join(output,`fullscreen-guide-${width}.png`)});}
@@ -367,6 +379,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     const preformGroup=page.locator('details[data-group="preform"]');
     if(!await preformGroup.evaluate(e=>e.open))await preformGroup.locator('summary').click();
     await page.locator('#trial-choice').selectOption('upper');
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.52');
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
     await page.locator('#generate').click();
     await page.waitForFunction(() => !document.getElementById('download-zip').disabled || !document.getElementById('error').hidden, null, { timeout: 120000 });
@@ -382,6 +395,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     await page.evaluate(()=>{window.__restoreStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw new DOMException('Storage quota exceeded','QuotaExceededError');};});await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'false');assert.match(await page.locator('#error').textContent(),/無法儲存/);await page.evaluate(()=>{Storage.prototype.setItem=window.__restoreStorageSet;delete window.__restoreStorageSet;});
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),true);assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');
     await page.reload({waitUntil:'networkidle'});await modelReady();assert.equal(await page.locator('#trial-choice').inputValue(),'upper');assert.equal(await page.locator('#trial-choice').isDisabled(),true);
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.52');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.52 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
     const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['report.json']));assert.equal(trialReport.results.trial_status,'locked');assert.ok(Math.abs(trialReport.results.model_thickness-trialReport.results.calculated_thickness-.15)<1e-10);
     await page.locator('#copper-pad_size').fill('1.6');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');

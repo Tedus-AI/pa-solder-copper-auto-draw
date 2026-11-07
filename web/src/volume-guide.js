@@ -57,21 +57,30 @@ export class VolumeGuide3D{
   this.resize=()=>{const w=el.clientWidth,h=el.clientHeight;if(!w||!h)return;this.renderer.setSize(w,h);const a=w/h;Object.assign(this.camera,{left:-this.extent*a/2,right:this.extent*a/2,top:this.extent/2,bottom:-this.extent/2});this.camera.updateProjectionMatrix();};this.observer=new ResizeObserver(this.resize);this.observer.observe(el);this.resize();this.resetView();this.select('all');
   if(inspector){this.overlay=document.createElementNS('http://www.w3.org/2000/svg','svg');this.overlay.classList.add('guide-dimension-overlay');this.overlay.innerHTML='<defs><marker id="guide-dim-arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10Z" fill="#b14520"/></marker></defs><line class="guide-inspector-line" marker-start="url(#guide-dim-arrow)" marker-end="url(#guide-dim-arrow)"/><circle r="6"/><circle r="6"/>';el.append(this.overlay);this.overlay.style.display="none";}
   const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const render=t=>{this.frame=requestAnimationFrame(render);this.controls.update();const pulse=reduce?.4:.08+1.1*(.5+.5*Math.sin(t/220));for(const {mesh}of this.objects)mesh.material.emissiveIntensity=mesh.userData.selected?pulse:0;this.renderer.render(this.scene,this.camera);this.renderDimension();};this.frame=requestAnimationFrame(render);
+  const render=t=>{this.frame=requestAnimationFrame(render);this.controls.update();const pulse=this.inspector?0:reduce?.4:.08+1.1*(.5+.5*Math.sin(t/220));for(const {mesh}of this.objects)mesh.material.emissiveIntensity=mesh.userData.selected?pulse:0;this.renderer.render(this.scene,this.camera);this.renderDimension();};this.frame=requestAnimationFrame(render);
  }
  resetView(view='iso'){const{offset,up}=cameraView(view,this.extent*2);this.camera.up.set(...up);this.camera.position.copy(this.center).add(new THREE.Vector3(...offset));this.camera.zoom=1;this.camera.lookAt(this.center);this.controls.target.copy(this.center);this.camera.updateProjectionMatrix();this.controls.update();}
  select(mode){this.mode=mode;this.el.dataset.volume=mode;
   for(const {mesh,edge,rec}of this.objects){const dimension=mode==='dimension',chosen=dimension?component(rec)===this.dimension.component:rec.role===mode,all=mode==='all';
-   mesh.visible=edge.visible=rec.role==='reference'||rec.role==='copper'||chosen||all&&!['cavity','preform'].includes(rec.role);
+   mesh.visible=edge.visible=dimension?chosen:rec.role==='reference'||rec.role==='copper'||chosen||all&&!['cavity','preform'].includes(rec.role);
    const opacity=chosen?1:all?(rec.role==='solder'?.65:rec.part==='pcb'?.25:.85):.1;
    mesh.userData.selected=chosen;Object.assign(mesh.material,{transparent:opacity<1,opacity,depthWrite:opacity===1});mesh.material.emissive.setHex(chosen?rec.color:0);edge.material.opacity=chosen?.9:.16;mesh.material.needsUpdate=true;
   }this.el.dataset.selectedOpacity=mode==='all'?'mixed':'1';
+  this.el.dataset.visibleComponents=[...new Set(this.objects.filter(({mesh})=>mesh.visible).map(({rec})=>component(rec)))].sort().join(',');
+ }
+ fitVisible(view){
+  this.resetView(view);
+  const box=new THREE.Box3();for(const {mesh}of this.objects)if(mesh.visible)box.expandByObject(mesh);
+  if(this.dimension)for(const p of[this.dimension.a,this.dimension.b])box.expandByPoint(new THREE.Vector3(...p));
+  const center=box.getCenter(new THREE.Vector3());this.camera.position.add(center.clone().sub(this.controls.target));this.controls.target.copy(center);this.camera.lookAt(center);this.camera.updateMatrixWorld(true);
+  const projected=new THREE.Box3();for(const x of[box.min.x,box.max.x])for(const y of[box.min.y,box.max.y])for(const z of[box.min.z,box.max.z])projected.expandByPoint(new THREE.Vector3(x,y,z).applyMatrix4(this.camera.matrixWorldInverse));
+  const size=projected.getSize(new THREE.Vector3());this.camera.zoom=Math.min(40,(this.camera.right-this.camera.left)/(Math.max(size.x,.1)*1.25),(this.camera.top-this.camera.bottom)/(Math.max(size.y,.1)*1.25));this.camera.updateProjectionMatrix();this.controls.update();
  }
  selectDimension(key){
   const r=this.r,[x,y]=r.boss_center,z=referenceLevels(r);
   let d=key==='h'?{a:[x+r.boss_length/2,y,z.base],b:[x+r.boss_length/2,y,z.flange],value:r.copper_to_flange,view:'front',component:'cavity',label:`h = ${r.copper_to_flange.toFixed(4)} mm`}:dimensionFor(key,r,layoutGeometry(r));
   if(key!=='h'){d={...d,component:key.startsWith('pcb.')?'pcb':key.startsWith('preform.')?'preform':'copper',label:dimensionLabel(d)};if(key.startsWith('preform.')){d.a=d.a.map((v,i)=>v+[x,y,z.boss][i]);d.b=d.b.map((v,i)=>v+[x,y,z.boss][i]);}}
-  this.dimension=d;this.el.dataset.dimension=key;this.select('dimension');this.resetView(d.view);if(Math.abs(d.a[2]-d.b[2])>1e-9){const target=new THREE.Vector3(...d.a).add(new THREE.Vector3(...d.b)).multiplyScalar(.5);this.camera.position.add(target.clone().sub(this.controls.target));this.controls.target.copy(target);this.camera.zoom=Math.min(12,this.extent/(Math.abs(d.a[2]-d.b[2])*10));}else this.camera.zoom=1.4;this.camera.updateProjectionMatrix();this.controls.update();this.overlay.style.display="block";return d.label;
+  this.dimension=d;this.el.dataset.dimension=key;this.select('dimension');this.fitVisible(d.view);this.overlay.style.display="block";return d.label;
  }
  renderDimension(){if(!this.overlay||!this.dimension)return;const w=this.el.clientWidth,h=this.el.clientHeight;this.overlay.setAttribute('viewBox',`0 0 ${w} ${h}`);const points=[this.dimension.a,this.dimension.b].map(p=>{const v=new THREE.Vector3(...p).project(this.camera);return[(v.x+1)*w/2,(1-v.y)*h/2];});const line=this.overlay.querySelector('line');for(const[i,[x,y]]of points.entries()){line.setAttribute(`x${i+1}`,x);line.setAttribute(`y${i+1}`,y);const circle=this.overlay.querySelectorAll('circle')[i];circle.setAttribute('cx',x);circle.setAttribute('cy',y);}}
  dispose(){cancelAnimationFrame(this.frame);this.observer.disconnect();this.controls.dispose();for(const {mesh,edge}of this.objects){mesh.geometry.dispose();mesh.material.dispose();edge.geometry.dispose();edge.material.dispose();}this.renderer.dispose();this.renderer.forceContextLoss();this.renderer.domElement.remove();this.overlay?.remove();}

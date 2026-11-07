@@ -316,6 +316,7 @@ for(const component of ['copper','preform','pcb','pa','epad']){
 $('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
 for(const view of ['iso','iso-bottom',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
 $('view-orthographic').addEventListener('click',()=>viewer.setView(viewer.lastOrthographicView||'top'));
+$('view-grid').addEventListener('click',()=>{viewer.setGridVisible(!viewer.grid?.visible);$('view-grid').setAttribute('aria-pressed',String(viewer.grid?.visible??false));});
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
 $('calculation-guide-open').addEventListener('click',showCalculationGuide);
@@ -323,11 +324,12 @@ $('help-open').addEventListener('click',()=>$('help-dialog').showModal());
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
 function renderTrial(r){
-  const labels=['下','中','上'];$('trial-candidates').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('span');el.textContent=`${labels[i]} ${v.toFixed(4)}`;return el;}));
-  $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(6)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked;
+  const labels=['下','中','上'];$('trial-candidates').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('span');el.textContent=`${labels[i]} ${v.toFixed(2)}`;el.classList.toggle('selected',trialChoices[i]===trialRecord.choice);return el;}));
+  $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(2)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked;
   $('trial-lock').textContent=trialRecord.locked?'🔒':'🔓';$('trial-lock').setAttribute('aria-pressed',String(trialRecord.locked));$('trial-lock').title=trialRecord.locked?'解鎖後重新選定試片':'鎖定並儲存此案的驗證結果';
-  $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(6)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(6)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
-  inputFor('preform.thickness_override').value=r.model_thickness.toFixed(4);
+  $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(2)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(2)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
+  document.querySelector('.trial-selection').dataset.status=r.trial_status;
+  inputFor('preform.thickness_override').value=r.model_thickness.toFixed(2);
 }
 $('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);});
 $('trial-lock').addEventListener('click',()=>{const previous=structuredClone(trialRecord);try{if(trialRecord.locked){trialRecord={...emptyTrial(),choice:trialRecord.choice};}else{const r=calculate(syncLinkedFields(formValues()));trialRecord={choice:trialRecord.choice,locked:true,value:r.model_thickness,signature:r.trial_signature,confirmed_at:new Date().toISOString()};}invalidate();refreshPreview(true);if(!saveProject())throw new Error('試片結果無法儲存，已保留原鎖定狀態；請確認瀏覽器儲存空間。');submitProjectModel();}catch(e){trialRecord=previous;refreshPreview();error(e.message);}});

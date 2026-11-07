@@ -10,6 +10,6 @@ test('all trial selections drive export, locks persist and altered geometry make
  for(const[choice,delta]of[['lower',-.15],['middle',0],['upper',.15]]){const d=structuredClone(defaults);d.trial_result.choice=choice;const before=calculate(d);assert.ok(Math.abs(before.model_thickness-before.calculated_thickness-delta)<1e-12);d.trial_result={choice,locked:true,value:before.model_thickness,signature:before.trial_signature,confirmed_at:'2026-11-07T00:00:00Z'};const r=calculate(d);assert.equal(r.trial_status,'locked');assert.equal(calculate(JSON.parse(JSON.stringify(r.design))).trial_status,'locked');assert.equal(nativeJob(r).native_parameters.preform.PREFORM_Z,r.model_thickness);d.copper.pad_size=1.6;const changed=calculate(d);assert.equal(changed.trial_status,'stale');assert.equal(changed.design.trial_result.value,r.model_thickness);}
 });
 test('inspector lists physical dimensions with inline units and flipped iso is a 180 degree rotation',()=>{
- const rows=inspectorRows(calculate(defaults));assert.equal(rows.length,13);assert.ok(rows.every(r=>r.unit==='mm'));assert.ok(!rows.some(r=>['Z','V₁','V₂','A₁','V₁₋₁'].includes(r.symbol)));
+ const rows=inspectorRows(calculate(defaults));assert.equal(rows.length,12);assert.ok(rows.every(r=>r.unit==='mm'));assert.ok(!rows.some(r=>['Z','V₁','V₂','A₁','V₁₋₁','ΔZ'].includes(r.symbol)));
  const a=cameraView('iso',10),b=cameraView('iso-bottom',10);assert.deepEqual(b.offset,[a.offset[0],-a.offset[1],-a.offset[2]]);assert.deepEqual(b.up,[0,0,-1]);
 });
