@@ -5,6 +5,11 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { unzipSync, strFromU8 } = require('fflate');
+async function withDeadline(operation,ms,label){
+  let timer;
+  try{return await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} timed out after ${ms}ms`)),ms);})]);}
+  finally{clearTimeout(timer);}
+}
 
 (async () => {
   const output = process.env.TEST_OUTPUT || '/tmp/pa-cad-web-test'; fs.mkdirSync(output, { recursive: true });
@@ -19,7 +24,8 @@ const { unzipSync, strFromU8 } = require('fflate');
     for (let i = 0; i < 60; i++) { try { const r = await fetch(url); if (r.ok) { available = true; break; } } catch {} await new Promise(r => setTimeout(r, 1000)); }
     assert.ok(available, `Website did not become available: ${url}`);
     const executable = process.env.CHROMIUM_PATH || (process.env.CI ? undefined : ['/usr/bin/chromium', '/usr/bin/google-chrome'].find(p => fs.existsSync(p)));
-    browser = await chromium.launch({ executablePath: executable, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    // Use full Chromium's headless mode for WebGL, rather than headless shell.
+    browser = await chromium.launch({ executablePath: executable, channel:executable?undefined:'chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     page = await browser.newPage({ viewport: { width: 1920, height: 900 }, locale: 'zh-TW', acceptDownloads: true, reducedMotion: 'no-preference' });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') console.error('Browser console:', m.text()); });
@@ -39,7 +45,7 @@ const { unzipSync, strFromU8 } = require('fflate');
     // is discarded. This avoids compositor screenshot stalls in headless CI.
     const captureGrid=async()=>{
       const before=await page.locator('#viewer').boundingBox();
-      const data=await page.locator('#viewer canvas').evaluate(canvas=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(canvas.toDataURL('image/png'))))));
+      const data=await withDeadline(page.locator('#viewer canvas').evaluate(canvas=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(canvas.toDataURL('image/png')))))),120000,'Grid WebGL frame readback');
       const clip=await page.locator('#viewer').boundingBox();assert.deepEqual(clip,before,'The viewer viewport must remain stable');
       const png=Buffer.from(data.split(',')[1],'base64');assert.ok(png.length>10000,'The captured WebGL frame must contain rendered geometry');return png;
     };
@@ -452,8 +458,8 @@ const { unzipSync, strFromU8 } = require('fflate');
     let diagnostic='';
     try{
       if(page){
-        diagnostic=JSON.stringify(await page.evaluate(()=>({key:document.getElementById('viewer')?.dataset.dimension,view:document.getElementById('viewer')?.dataset.cameraView,annotation:document.getElementById('viewer')?.dataset.annotationLayout,notation:document.querySelector('.dimension-number')?.textContent})));
-        fs.writeFileSync(path.join(output,'failure.json'),diagnostic);await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});
+        diagnostic=JSON.stringify(await withDeadline(page.evaluate(()=>({key:document.getElementById('viewer')?.dataset.dimension,view:document.getElementById('viewer')?.dataset.cameraView,annotation:document.getElementById('viewer')?.dataset.annotationLayout,notation:document.querySelector('.dimension-number')?.textContent})),5000,'Failure diagnostics'));
+        fs.writeFileSync(path.join(output,'failure.json'),diagnostic);await page.screenshot({path:path.join(output,'failure.png'),fullPage:true,timeout:10000});
       }
     }catch{}
     if(process.env.CI){const message=(String(e.stack||e)+'\n'+diagnostic).slice(0,12000).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');console.log(`::error title=Browser regression::${message}`);}
