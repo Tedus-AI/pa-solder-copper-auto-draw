@@ -32,14 +32,14 @@ async function withDeadline(operation,ms,label){
     await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
     await page.waitForFunction(() => !document.getElementById('download-zip').disabled || !document.getElementById('error').hidden, null, { timeout: 120000 });
     assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
-    assert.equal(await page.locator('#metric-z').textContent(), '0.374779');
+    assert.equal(await page.locator('#metric-z').textContent(), '0.385851');
     assert.equal(await page.locator('#metric-l').textContent(), '0.4800');
     assert.equal(await page.locator('.metrics').isVisible(),false);assert.doesNotMatch(await page.locator('body').textContent(),/CuH/);assert.equal(await page.locator('#preform-chamfer').inputValue(),'3.40');assert.equal(await page.locator('#preform-trial_delta').inputValue(),'0.15');for(const id of ['preform-chamfer','preform-trial_delta','preform-thickness_override'])assert.equal(await page.locator(`#${id}`).getAttribute('aria-readonly'),'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-ready'), 'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-parts'), 'pcb,pa');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-opening'), 'true');
-    assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.22 mm','中：0.37 mm','上：0.52 mm']);
-    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.37');
+    assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.24 mm','中：0.39 mm','上：0.54 mm']);
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.39');
     await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-selection.png')});
     // Read actual WebGL pixels in the render frame, before the drawing buffer
     // is discarded. This avoids compositor screenshot stalls in headless CI.
@@ -91,7 +91,7 @@ async function withDeadline(operation,ms,label){
     assert.match(await page.locator('#formula-tooltip').textContent(),/3～3.1 mm/);assert.doesNotMatch(await page.locator('#formula-tooltip').textContent(),/來源/);assert.doesNotMatch(await page.locator('#fields').textContent(),/孔位由兩相鄰外邊定位/);await page.keyboard.press('Escape');
     await page.locator('#calculation-guide-open').click();
     assert.equal(await page.locator('#calculation-guide').isVisible(),true);
-    assert.match(await page.locator('.guide-summary').textContent(),/0.374779/);
+    assert.match(await page.locator('.guide-summary').textContent(),/0.385851/);
     await page.locator('#calculation-guide').screenshot({path:path.join(output,'thickness-diagram.png')});
     await page.locator('[data-guide-layer="cavity"]').click();
     assert.equal(await page.locator('[data-volume-role=cavity]').evaluate(e=>getComputedStyle(e).opacity),'1');
@@ -295,7 +295,7 @@ async function withDeadline(operation,ms,label){
     assert.equal(report.verification, 'volume_and_step_roundtrip_passed'); assert.equal(report.native_prt.status, 'not_generated');
     assert.equal(report.reference_geometry.pcb,'display_only');assert.equal(report.reference_geometry.pa,'display_only');
     assert.ok(report.layout.epad_cells>200);
-    assert.ok(Math.abs(report.cad_volumes_mm3.preform - 66.9958033717615) < .001);
+    assert.ok(Math.abs(report.cad_volumes_mm3.preform - 68.97470674352311) < .001);
     const hashes = JSON.parse(strFromU8(files['sha256.json']));
     for (const [name, digest] of Object.entries(hashes)) assert.equal(crypto.createHash('sha256').update(files[name]).digest('hex'), digest);
     const job = JSON.parse(strFromU8(files['creo_job.json'])); assert.equal(job.step_import_acceptable, false); assert.equal(job.target.version, '7.0.10.0');
@@ -393,7 +393,7 @@ async function withDeadline(operation,ms,label){
     const preformGroup=page.locator('details[data-group="preform"]');
     if(!await preformGroup.evaluate(e=>e.open))await preformGroup.locator('summary').click();
     await page.locator('#trial-choice').selectOption('upper');
-    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.52');
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.54');
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
     await page.locator('#generate').click();
     await page.waitForFunction(() => !document.getElementById('download-zip').disabled || !document.getElementById('error').hidden, null, { timeout: 120000 });
@@ -405,14 +405,18 @@ async function withDeadline(operation,ms,label){
     const layoutFile=await layoutDownload;assert.match(layoutFile.suggestedFilename(),/layout_solder_mask\.dxf$/);
     await layoutFile.saveAs(path.join(output,'layout_solder_mask.dxf'));
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});
-    assert.equal(await page.locator('#metric-model').textContent(), '0.524779');
+    assert.equal(await page.locator('#metric-model').textContent(), '0.535851');
+    // A lock on a new or edited project is not written silently; save first.
+    await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');assert.match(await page.locator('#project-save-status').textContent(),/尚未儲存/);
+    await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'false');
+    await page.locator('#project-save').click();assert.match(await page.locator('#project-save-status').textContent(),/已儲存/);
     await page.evaluate(()=>{window.__restoreStorageSet=Storage.prototype.setItem;Storage.prototype.setItem=function(){throw new DOMException('Storage quota exceeded','QuotaExceededError');};});await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'false');assert.match(await page.locator('#error').textContent(),/無法儲存/);await page.evaluate(()=>{Storage.prototype.setItem=window.__restoreStorageSet;delete window.__restoreStorageSet;});
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),true);assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');
     await page.reload({waitUntil:'networkidle'});await modelReady();assert.equal(await page.locator('#trial-choice').inputValue(),'upper');assert.equal(await page.locator('#trial-choice').isDisabled(),true);
-    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.52');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.52 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
+    assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.54');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.54 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
     const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['report.json']));assert.equal(trialReport.results.trial_status,'locked');assert.ok(Math.abs(trialReport.results.model_thickness-trialReport.results.calculated_thickness-.15)<1e-10);
     await page.locator('#copper-pad_size').fill('1.6');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
-    await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
+    await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.match(await page.locator('#project-save-status').textContent(),/已解鎖，尚未儲存/);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
     await focusNominal('copper.pad_size');await page.locator('#copper-pad_size').fill('4'); await page.locator('#generate').click();
     await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /削角/);
     assert.equal(await page.locator('#download-zip').isDisabled(), true);

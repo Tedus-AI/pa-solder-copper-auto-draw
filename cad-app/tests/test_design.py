@@ -20,11 +20,11 @@ def test_pdf_page13_numeric_regression(data):
     assert (r.boss_length, r.boss_width) == (20.6, 9.8)
     assert r.boss_total_height == pytest.approx(.48)
     assert r.copper_to_flange == pytest.approx(.63)
-    assert r.cavity_volume == pytest.approx(134.966, abs=.0005)
+    assert r.cavity_volume == pytest.approx(136.945107, abs=.0005)  # 4 relief half-discs, not p12's one circle
     assert r.boss_volume == pytest.approx(67.970, abs=.0005)
-    assert r.solder_volume == pytest.approx(66.996, abs=.0005)
+    assert r.solder_volume == pytest.approx(68.974707, abs=.0005)
     assert r.preform_area == pytest.approx(178.76)
-    assert r.calculated_thickness == pytest.approx(.374779052203)
+    assert r.calculated_thickness == pytest.approx(.385850899214)
     assert r.recommended_opening == (20.9, 10.1)
     assert r.trial_thicknesses == pytest.approx((r.calculated_thickness-.15, r.calculated_thickness, r.calculated_thickness+.15))
 
@@ -139,9 +139,9 @@ def test_invalid_opening_linkage_rejected(data, key, value):
 
 
 def test_modern_browser_boss_and_tolerance_metadata(data):
-    data["boss"] = {"length": 21, "width": 10, "total_height": .55,
+    data["boss"] = {"length": 21, "width": 10,
                     "center_from_left": 21, "center_from_bottom": 14,
-                    "size_mode": "manual", "height_mode": "manual"}
+                    "size_mode": "manual", "height_mode": "auto"}
     data["pcb"].update(opening_length=21.5, opening_width=10.5)
     data["preform"].update(length=21, width=10)
     data["tolerances"] = {"package.length": {"minus": .1, "plus": .2},
@@ -149,7 +149,9 @@ def test_modern_browser_boss_and_tolerance_metadata(data):
                           "boss.length": {"minus": .05, "plus": .05}}
     d = Design.from_mapping(data)
     r = calculate(d)
-    assert (r.boss_length, r.boss_width, r.boss_total_height) == (21, 10, .55)
+    assert (r.boss_length, r.boss_width) == (21, 10)
+    assert r.boss_total_height == pytest.approx(.48)
+    assert any("未置中" in w for w in r.warnings)
     assert r.boss_center == (1, -1)
     assert r.gap_analysis["x"]["min"] == pytest.approx((21.5-.15-20.57-.2)/2)
     assert r.gap_analysis["x"]["max"] == pytest.approx((21.5+.1-20.57+.1)/2)
@@ -207,3 +209,93 @@ console.log(JSON.stringify(calculate(d).design));"""
     stale=calculate(Design.from_mapping(exported))
     assert stale.trial_status=='stale'
     assert exported['trial_result']['value']==r.model_thickness
+
+
+# --- Browser (web/src/design.js) / Python parity -------------------------------
+
+def _node(source):
+    import json
+    import shutil
+    import subprocess
+    if not shutil.which("node"):
+        pytest.skip("node is required for browser parity checks")
+    return json.loads(subprocess.check_output(["node", "--input-type=module", "-e", source], cwd=ROOT.parent, text=True))
+
+
+def _parity_cases(data):
+    cases = {"example": deepcopy(data)}
+    c = deepcopy(data); c["pcb"] = {k: v for k, v in c["pcb"].items() if k not in ("opening_length", "opening_width")}
+    cases["no_opening_dims_is_auto"] = c
+    c = deepcopy(data); c["pcb"]["opening_mode"] = "auto"; c["pcb"]["opening_rule"] = "ampleon"
+    c["tolerances"] = {"pcb.opening_length": {"minus": .2}, "package.width": {"plus": .2, "source": "datasheet"}}
+    cases["partial_tolerances_ampleon"] = c
+    c = deepcopy(data); c["pcb"].update(opening_width=8.5, relief_diameter=4.4); c["package"]["width"] = 8
+    c["boss"] = {"center_from_left": 18, "center_from_bottom": 14}
+    cases["overlapping_relief_offset_boss"] = c
+    c = deepcopy(data); c["stack"]["lead_solder"] = .12; cases["edited_stack_rejected"] = c
+    c = deepcopy(data); c["boss"] = {"height_mode": "manual", "total_height": .5}; cases["manual_height_rejected"] = c
+    c = deepcopy(data); c["tolerances"] = {"pcb.unknown": {"minus": 0, "plus": 0}}; cases["unknown_tolerance_rejected"] = c
+    c = deepcopy(data); c["copper"]["hole_diameter"] = 15; cases["hole_too_large_rejected"] = c
+    c = deepcopy(data); del c["copper"]["base_width"]; cases["missing_base_rejected"] = c
+    return cases
+
+
+def _python_summary(case):
+    try:
+        r = calculate(Design.from_mapping(case))
+    except ValueError:
+        return {"ok": False}
+    return {"ok": True, "L": r.boss_total_height, "h": r.copper_to_flange, "cavity": r.cavity_volume,
+            "solder": r.solder_volume, "z": r.calculated_thickness, "opening": list(r.recommended_opening),
+            "gap": [r.gap_analysis[a][k] for a in "xy" for k in ("nominal", "min", "max")],
+            "signature": r.trial_signature, "base_area": r.copper_base_area}
+
+
+def test_browser_and_python_accept_and_compute_the_same_designs(data):
+    import json
+    cases = _parity_cases(data)
+    source = """import{calculate}from'./web/src/design.js';
+const cases=%s,out={};
+for(const[name,c]of Object.entries(cases)){try{const r=calculate(c),g=r.gap_analysis;
+out[name]={ok:true,L:r.boss_total_height,h:r.copper_to_flange,cavity:r.cavity_volume,solder:r.solder_volume,z:r.calculated_thickness,
+opening:r.recommended_opening,gap:['x','y'].flatMap(a=>['nominal','min','max'].map(k=>g[a][k])),signature:r.trial_signature,base_area:r.copper_base_area};}
+catch(e){out[name]={ok:false,message:e.message};}}
+console.log(JSON.stringify(out));""" % json.dumps(cases)
+    browser = _node(source)
+    for name, case in cases.items():
+        py, js = _python_summary(case), browser[name]
+        assert py["ok"] == js["ok"], (name, js.get("message"))
+        if not py["ok"]:
+            assert name.endswith("_rejected"), name
+            continue
+        assert py["signature"] == js["signature"], name
+        for key in ("L", "h", "cavity", "solder", "z", "base_area"):
+            assert py[key] == pytest.approx(js[key], rel=1e-9, abs=1e-9), (name, key)
+        assert py["opening"] == pytest.approx(js["opening"]), name
+        assert py["gap"] == pytest.approx(js["gap"]), name
+
+
+def test_tolerance_tables_match_browser():
+    from pa_cad.design import TOLERANCE_DEFAULTS
+    browser = _node("import{toleranceDefaults}from'./web/src/tolerances.js';"
+                    "console.log(JSON.stringify(Object.fromEntries(Object.entries(toleranceDefaults).map(([k,v])=>[k,[v.minus,v.plus]]))));")
+    assert {k: list(v) for k, v in TOLERANCE_DEFAULTS.items()} == browser
+
+
+def test_relief_area_handles_overlapping_half_discs():
+    import math
+    from pa_cad.design import relief_area
+    assert relief_area(10.1, 2) == pytest.approx(2*math.pi)
+    assert relief_area(6, 4) < 2*math.pi*4
+    browser = _node("import{reliefArea}from'./web/src/design.js';console.log(JSON.stringify(reliefArea({opening_width:6,relief_diameter:4})));")
+    assert relief_area(6, 4) == pytest.approx(browser, rel=1e-12)
+
+
+def test_locked_trial_requires_iso_timestamp(data):
+    r = calculate(Design.from_mapping(data))
+    data["trial_result"] = {"choice": "middle", "locked": True, "value": r.model_thickness,
+                            "signature": r.trial_signature, "confirmed_at": "yesterday"}
+    with pytest.raises(ValueError, match="ISO 8601"):
+        Design.from_mapping(data)
+    data["trial_result"]["confirmed_at"] = "2026-11-08T09:30:00+08:00"
+    assert calculate(Design.from_mapping(data)).trial_status == "locked"

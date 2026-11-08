@@ -203,3 +203,27 @@ def test_selected_corner_solids_and_native_contract(tmp_path,corners):
     from dataclasses import asdict
     job=prepare_job(d.to_mapping(),asdict(r),{'copper':solid.val().Volume(),'preform':r.preform_area*r.model_thickness})
     validate_job(job)
+
+
+def test_browser_dxf_files_are_complete_r2010_documents(tmp_path):
+    """The web DXF writers must load strictly (no recover) and pass ezdxf's audit."""
+    import collections
+    import shutil
+    import subprocess
+    import ezdxf
+    if not shutil.which("node"):
+        pytest.skip("node is required to run the browser DXF writers")
+    source = """import{calculate,defaults}from'./web/src/design.js';import{drawing}from'./web/src/dxf.js';import{layoutDxf}from'./web/src/layout.js';
+import{writeFileSync}from'node:fs';const r=calculate(defaults),out=process.argv[1];
+writeFileSync(out+'/copper.dxf',drawing(r,'copper'));writeFileSync(out+'/preform.dxf',drawing(r,'preform'));writeFileSync(out+'/layout.dxf',layoutDxf(r));"""
+    subprocess.run(["node", "--input-type=module", "-e", source, str(tmp_path)], cwd=Path(__file__).parents[2], check=True)
+    for name in ("copper", "preform", "layout"):
+        doc = ezdxf.readfile(tmp_path / f"{name}.dxf")
+        assert doc.dxfversion == "AC1024"
+        audit = doc.audit()
+        assert not audit.errors and not audit.fixes, (name, audit.errors, audit.fixes)
+        assert set(doc.layouts.names()) == {"Model", "Layout1"}
+        assert "CENTER" in doc.linetypes
+        types = collections.Counter(e.dxftype() for e in doc.modelspace())
+        assert types["TEXT"] > 5 and types["LWPOLYLINE"] >= 2, (name, types)
+    assert collections.Counter(e.dxftype() for e in ezdxf.readfile(tmp_path / "layout.dxf").modelspace())["HATCH"] > 100

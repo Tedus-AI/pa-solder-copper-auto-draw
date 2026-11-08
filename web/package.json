@@ -8,7 +8,10 @@
     "build": "node scripts/copy-resources.mjs && vite build",
     "test": "node --test tests/*.test.js",
     "test:browser": "node tests/browser.cjs",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "lint": "eslint .",
+    "format": "prettier --write src/design.js src/layout.js src/dxf-document.js eslint.config.js",
+    "format:check": "prettier --check src/design.js src/layout.js src/dxf-document.js eslint.config.js"
   },
   "dependencies": {
     "fflate": "0.8.2",
@@ -19,7 +22,11 @@
     "yaml": "2.8.2"
   },
   "devDependencies": {
+    "@eslint/js": "9.36.0",
     "@playwright/test": "1.64.1",
+    "eslint": "9.36.0",
+    "globals": "16.4.0",
+    "prettier": "3.6.2",
     "vite": "8.3.6"
   }
 }

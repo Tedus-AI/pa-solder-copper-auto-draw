@@ -1,7 +1,7 @@
 import './style.css';
 import { zipSync, strToU8 } from 'fflate';
 import { parse, stringify } from 'yaml';
-import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalize } from './design.js';
+import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject } from './design.js';
 import { toleranceDefaults, getTolerance, toleranceText, toleranceSource } from './tolerances.js';
 import { faceViews } from './camera-views.js';
 import { formatDimension } from './dimension-format.js';
@@ -15,7 +15,7 @@ import { createCalculationGuide } from './calculation-guide.js';
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial();
-const projectStore=new BrowserProjectStore();let activeProjectId=null,rebuildQueued=false,projectMetadataValid=true;
+const projectStore=new BrowserProjectStore();let activeProjectId=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 const downloadButtons=['download-zip','download-dxf','download-step'];
 const formulaButtons=new Map();let activeFormulaButton=null;
 const calculationIds=new Set(['metric-z','metric-model','metric-volume','v-cavity','v-boss','v-area','trials']);
@@ -43,13 +43,18 @@ function formulaHelp(container,id,label){
 }
 function setFormula(id,text,visible=true){const button=formulaButtons.get(id);if(!button)return;button.dataset.formula=text;button.hidden=!visible;if(!visible&&activeFormulaButton===button)hideFormula();}
 window.addEventListener('resize',hideFormula);
+let scrollFrame=0;
 document.addEventListener('scroll',()=>{
-  if(!activeFormulaButton)return;
-  const rect=activeFormulaButton.getBoundingClientRect();
-  // A tap can finish scrolling its focused control after the click event.
-  // Keep an on-screen formula anchored instead of immediately dismissing it.
-  if(rect.bottom<0||rect.top>innerHeight)hideFormula();else showFormula(activeFormulaButton);
-},true);
+  // Reposition at most once per frame; scroll events can fire many times per frame.
+  if(!activeFormulaButton||scrollFrame)return;
+  scrollFrame=requestAnimationFrame(()=>{
+    scrollFrame=0;if(!activeFormulaButton)return;
+    const rect=activeFormulaButton.getBoundingClientRect();
+    // A tap can finish scrolling its focused control after the click event.
+    // Keep an on-screen formula anchored instead of immediately dismissing it.
+    if(rect.bottom<0||rect.top>innerHeight)hideFormula();else showFormula(activeFormulaButton);
+  });
+},{capture:true,passive:true});
 document.addEventListener('keydown',event=>{if(event.key==='Escape')hideFormula();});document.addEventListener('pointerdown',event=>{if(!event.target.closest('.formula-help')&&!formulaTooltip.contains(event.target))hideFormula();});
 
 $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
@@ -232,11 +237,12 @@ function invalidate(){
 // Only this controller knows about the browser repository. CAD calculations
 // continue to use a complete Design object, ready for a future backend adapter.
 function syncProjectMetadata(){
-  const project=normalize({project:{name:$('project-name').value.trim(),pa_model:$('pa-model').value.trim()}}).project;
+  const project=normalizeProject({name:$('project-name').value.trim(),pa_model:$('pa-model').value.trim()});
   for(const value of [result,draft])if(value?.results?.design)value.results.design.project=structuredClone(project);
   projectMetadataValid=true;downloadButtons.forEach(id=>$(id).disabled=!result);$('download-layout').disabled=!draft;
   return project;
 }
+function markDirty(message='有未儲存的變更'){projectDirty=true;projectMessage(message);}
 function projectMessage(message,failed=false){const output=$('project-save-status');output.textContent=message;output.title=message;output.classList.toggle('save-error',failed);}
 function refreshProjectList(){
   const select=$('project-select'),placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='載入已儲存專案…';
@@ -253,14 +259,14 @@ function saveProject(asNew=false){
     clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
     const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;
     $('project-name').value=design.project.name;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
-    projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
+    projectDirty=false;projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
   }catch(e){projectMessage(e.message,true);return null;}
 }
 function initializeProjects(){
   fill(structuredClone(defaults));
   try{
     const record=projectStore.active();
-    if(record){const design=calculate(record.design).design;fill(design);activeProjectId=record.id;projectMessage('已恢復最近儲存專案');}
+    if(record){const design=calculate(record.design).design;fill(design);activeProjectId=record.id;projectDirty=false;projectMessage('已恢復最近儲存專案');}
     refreshProjectList();
   }catch(e){projectMessage(e.message,true);$('project-delete').disabled=true;}
 }
@@ -271,7 +277,7 @@ $('project-select').addEventListener('change',()=>{
   try{
     const record=projectStore.get(id);if(!record)throw new Error('找不到這個專案。');
     const design=calculate(record.design).design;projectStore.activate(id);activeProjectId=id;fill(design);refreshProjectList();
-    projectMessage('已載入儲存專案');invalidate();submitProjectModel();
+    projectDirty=false;projectMessage('已載入儲存專案');invalidate();submitProjectModel();
   }catch(e){projectMessage(e.message,true);}
 });
 $('project-delete').addEventListener('click',()=>{
@@ -282,11 +288,11 @@ $('project-delete').addEventListener('click',()=>{
 
 $('design-form').addEventListener('input',event=>{
   if(['project-name','pa-model'].includes(event.target.id)){
-    try{syncProjectMetadata();projectMessage('有未儲存的變更');}
+    try{syncProjectMetadata();markDirty();}
     catch(e){projectMetadataValid=false;downloadButtons.forEach(id=>$(id).disabled=true);$('download-layout').disabled=true;projectMessage(e.message,true);}
     return;
   }
-  invalidate();projectMessage('有未儲存的變更');
+  invalidate();markDirty();
 });
 $('pcb-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('pcb-rule').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
@@ -298,11 +304,11 @@ $('design-form').addEventListener('focusin',event=>{
     clearTimeout(previewTimer);refreshPreview();if(event.target.classList.contains('tolerance-input'))viewer.selectTolerance(event.target.dataset.fieldKey);else viewer.selectDimension(event.target.name);
   }
 });
-$('reset').addEventListener('click',()=>{activeProjectId=null;fill(structuredClone(defaults));refreshProjectList();projectMessage('新專案尚未儲存');invalidate();submitProjectModel();});
+$('reset').addEventListener('click',()=>{activeProjectId=null;fill(structuredClone(defaults));refreshProjectList();markDirty('新專案尚未儲存');invalidate();submitProjectModel();});
 $('import').addEventListener('click',()=>$('import-file').click());
 $('import-file').addEventListener('change',async event=>{
   const file=event.target.files[0];if(!file)return;
-  try{if(file.size>128*1024)throw new Error('參數檔請小於128 KB。');const r=calculate(parse(await file.text(),{maxAliasCount:50}));activeProjectId=null;fill(r.design);refreshProjectList();projectMessage('匯入內容尚未儲存');invalidate();submitProjectModel();}
+  try{if(file.size>128*1024)throw new Error('參數檔請小於128 KB。');const r=calculate(parse(await file.text(),{maxAliasCount:50}));activeProjectId=null;fill(r.design);refreshProjectList();markDirty('匯入內容尚未儲存');invalidate();submitProjectModel();}
   catch(e){error(`匯入失敗：${e.message}`);}event.target.value='';
 });
 for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
@@ -331,8 +337,22 @@ function renderTrial(r){
   document.querySelector('.trial-selection').dataset.status=r.trial_status;
   inputFor('preform.thickness_override').value=r.model_thickness.toFixed(2);
 }
-$('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);});
-$('trial-lock').addEventListener('click',()=>{const previous=structuredClone(trialRecord);try{if(trialRecord.locked){trialRecord={...emptyTrial(),choice:trialRecord.choice};}else{const r=calculate(syncLinkedFields(formValues()));trialRecord={choice:trialRecord.choice,locked:true,value:r.model_thickness,signature:r.trial_signature,confirmed_at:new Date().toISOString()};}invalidate();refreshPreview(true);if(!saveProject())throw new Error('試片結果無法儲存，已保留原鎖定狀態；請確認瀏覽器儲存空間。');submitProjectModel();}catch(e){trialRecord=previous;refreshPreview();error(e.message);}});
+$('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);markDirty();});
+// Locking records the verified trial. It is written to storage immediately only
+// when it is the sole change to an already saved project; otherwise it would
+// silently persist unrelated edits or create a project, so the user saves.
+$('trial-lock').addEventListener('click',()=>{
+  const previous=structuredClone(trialRecord),wasDirty=projectDirty;
+  try{
+    if(trialRecord.locked)trialRecord={...emptyTrial(),choice:trialRecord.choice};
+    else{const r=calculate(syncLinkedFields(formValues()));trialRecord={choice:trialRecord.choice,locked:true,value:r.model_thickness,signature:r.trial_signature,confirmed_at:new Date().toISOString()};}
+    invalidate();refreshPreview(true);
+    const action=trialRecord.locked?'試片已鎖定':'試片已解鎖';
+    if(activeProjectId&&!wasDirty){if(!saveProject())throw new Error('試片結果無法儲存，已保留原鎖定狀態；請確認瀏覽器儲存空間。');projectMessage(`${action}並儲存`);}
+    else markDirty(`${action}，尚未儲存；請按「儲存」${activeProjectId?'':'建立專案'}保存`);
+    submitProjectModel();
+  }catch(e){trialRecord=previous;projectDirty=wasDirty;refreshPreview();error(e.message);}
+});
 function renderMetrics(r){
   renderTrial(r);
   for(const[id,v,digits]of [['metric-l',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
@@ -378,7 +398,7 @@ Y四捨五入到小數第二位，實際間隙 = ${f(r.corner_clearance)} mm。`
   setFormula('boss.center_from_bottom',`Yc 是從基座下外邊到中凸台中心的手動定位尺寸。\n按「置中」時計算 Yc = F / 2 = ${f(c.base_width)} / 2 = ${f(c.base_width/2)} mm。\n目前 Yc = ${f(d.boss.center_from_bottom)} mm；相對基座中心偏移 = ${f(r.boss_center[1])} mm。`);
   setFormula('boss-lower',`中凸台下段高度 = L − K\n= ${f(r.boss_total_height)} − ${f(s.pad_height)} = ${f(r.boss_lower_height)} mm。`);
   setFormula('hsk-depth',`在 HSK（散熱器）對應銅塊的位置加工凹槽，容納銅塊基座。\n槽深設計值 = 銅塊基座厚度 G + 0.05 mm\n= ${f(c.base_thickness)} + 0.05 = ${f(r.heatsink_depth)} mm。\n此 HSK 槽深的加工公差為 ±0.05 mm；允許深度 ${f(r.heatsink_depth-.05)}～${f(r.heatsink_depth+.05)} mm。`);
-  const cavity=`V₁₋₁ = [M × N + π × (O / 2)²] × (L + D − K)\n= [${f(b.opening_length)} × ${f(b.opening_width)} + π × (${f(b.relief_diameter)} / 2)²] × ${f(r.copper_to_flange)} = ${f(r.cavity_volume)} mm³\n依 PPT 第12頁的等效體積公式。`;
+  const cavity=`V₁₋₁ = [M × N + Aₒ] × (L + D − K)\nAₒ = 4 個外側半圓 = 4 × ½π × (${f(b.relief_diameter)} / 2)² = ${f(r.relief_area)} mm²（同側重疊時扣除）\n= [${f(b.opening_length)} × ${f(b.opening_width)} + ${f(r.relief_area)}] × ${f(r.copper_to_flange)} = ${f(r.cavity_volume)} mm³\n避空面積依 PCB 開孔實際輪廓（PPT 第7／9頁）；PPT 第12頁原式只計一個整圓。`;
   const boss=`V₂ = I × H × (L − K) + 4 × J² × K\n= ${f(r.boss_length)} × ${f(r.boss_width)} × ${f(r.boss_lower_height)} + 4 × ${f(c.pad_size)}² × ${f(s.pad_height)} = ${f(r.boss_volume)} mm³。`;
   const volume=`V₁ = V₁₋₁ − V₂\n= ${f(r.cavity_volume)} − ${f(r.boss_volume)} = ${f(r.solder_volume)} mm³。`;
   const area=`A₁ = W × X − 2 × Y²\n= ${f(t.length)} × ${f(t.width)} − 2 × ${f(t.chamfer)}² = ${f(r.preform_area)} mm²。`;
@@ -480,4 +500,8 @@ $('download-zip').addEventListener('click', async () => {
 });
 
 
-initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');$('design-form').requestSubmit();
+initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');
+// The JavaScript preview is shown first; the OpenCascade WebAssembly engine
+// (several MB) is fetched and the export model built once the page is idle.
+const buildWhenIdle=()=>submitProjectModel();
+if('requestIdleCallback' in window)requestIdleCallback(buildWhenIdle,{timeout:1500});else setTimeout(buildWhenIdle,200);

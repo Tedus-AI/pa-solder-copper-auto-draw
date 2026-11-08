@@ -7,8 +7,8 @@ const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b
 test('PDF volume subtraction with fixed 0.2828 mm corner clearance', () => {
   const r = calculate(defaults);
   near(r.boss_total_height, .48); near(r.copper_to_flange, .63);
-  near(r.boss_volume, 67.9704); near(r.cavity_volume, 134.966, .0005);
-  near(r.preform_area, 178.76); near(r.calculated_thickness, .374779052203);
+  near(r.boss_volume, 67.9704); near(r.cavity_volume, 136.945107, .0005);
+  near(r.preform_area, 178.76); near(r.calculated_thickness, .385850899214); near(r.relief_area, 2*Math.PI);
   near(r.solder_volume, r.calculated_thickness * r.preform_area);
   assert.deepEqual(r.recommended_opening, [20.9, 10.1]);
   near(r.corner_clearance, .282842712474619);
@@ -81,4 +81,50 @@ test('DXF outlines preserve mm units, holes, pads and octagonal preform', () => 
   assert.ok(cu.includes('$INSUNITS\n70\n4')); assert.equal((cu.match(/\nCIRCLE\n/g) || []).length, 2);
   assert.equal((cu.match(/\n8\nPAD\n/g) || []).length, 4);
   assert.ok(sn.includes('90\n8\n70\n1')); assert.ok(sn.endsWith('0\nEOF\n')); assert.equal(octagon(20.6, 9.8, 3.4).length, 8);
+});
+
+test('relief area equals the drawn PCB cutout outline, including overlapping same-side half-discs', async () => {
+  const { pcbCutout, area } = await import('../src/layout.js');
+  const { reliefArea } = await import('../src/design.js');
+  for (const [N, O] of [[10.1, 2], [10.1, 4], [6, 2.5], [6, 4]]) {
+    const d = structuredClone(defaults); d.pcb.opening_mode = 'manual'; d.pcb.opening_width = N; d.pcb.relief_diameter = O;
+    const b = d.pcb, r = { design: d, boss_center: [0, 0] };
+    const exact = b.opening_length * N + reliefArea(b);
+    // Polygon chords (<=0.001 mm) slightly under-fill each arc (~4e-5 relative).
+    assert.ok(Math.abs(area(pcbCutout(r)) - exact) < exact * 1e-4, `N=${N} O=${O}`);
+  }
+  const overlap = { opening_width: 6, relief_diameter: 4 };
+  assert.ok(reliefArea(overlap) < 2 * Math.PI * 4);
+});
+
+test('cavity uses the four outward relief half-discs, not one PDF p12 circle', () => {
+  const r = calculate(defaults), b = r.design.pcb;
+  near(r.cavity_volume, (b.opening_length * b.opening_width + 2 * Math.PI * (b.relief_diameter / 2) ** 2) * r.copper_to_flange);
+});
+
+test('off-centre boss and unused placement_accuracy are reported as warnings', () => {
+  const d = structuredClone(defaults); d.boss.center_from_left = 20.3;
+  assert.ok(calculate(d).warnings.some(w => /未置中/.test(w)));
+  assert.ok(!calculate(defaults).warnings.some(w => /未置中/.test(w)));
+  const legacy = structuredClone(defaults); legacy.pcb.placement_accuracy = .1;
+  assert.ok(calculate(legacy).warnings.some(w => /placement_accuracy/.test(w)));
+  legacy.pcb.placement_accuracy = .066;
+  assert.ok(!calculate(legacy).warnings.some(w => /placement_accuracy/.test(w)));
+});
+
+test('locked trial needs an ISO 8601 confirmation time and tolerance pairs may carry a source note', () => {
+  const d = structuredClone(defaults), r = calculate(d);
+  d.trial_result = { choice: 'middle', locked: true, value: r.model_thickness, signature: r.trial_signature, confirmed_at: 'yesterday' };
+  assert.throws(() => calculate(d), /ISO 8601/);
+  d.trial_result.confirmed_at = '2026-11-08T09:30:00+08:00';
+  assert.equal(calculate(d).trial_status, 'locked');
+  const t = structuredClone(defaults); t.tolerances = { 'package.length': { minus: .1, plus: .2, source: 'datasheet rev B' } };
+  assert.equal(calculate(t).design.tolerances['package.length'].plus, .2);
+  t.tolerances['package.length'].source = 3;
+  assert.throws(() => calculate(t), /公差格式/);
+});
+
+test('hole diameter must stay below half of the short base side', () => {
+  const d = structuredClone(defaults); d.copper.hole_diameter = 15;
+  assert.throws(() => calculate(d), /短邊的一半/);
 });

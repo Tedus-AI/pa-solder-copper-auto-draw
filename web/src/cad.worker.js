@@ -19,8 +19,12 @@ self.onmessage = async ({ data: { id, design } }) => {
     const [cx,cy]=r.boss_center||[0,0];
     self.postMessage({ id, status: '正在建立銅塊與錫片實體…' });
     let copper = keep(sketchRoundedRectangle(c.base_length, c.base_width, c.corner_radius).extrude(c.base_thickness));
+    // The drilling tool overshoots both base faces so the boolean cut never
+    // relies on coplanar faces (a common OpenCascade failure mode). The hole
+    // itself is identical: material only exists between z = 0 and G.
+    const overshoot = .1;
     for (const [hx,hy] of holeCenters(c)) {
-      const hole = keep(makeCylinder(c.hole_diameter / 2, c.base_thickness, [hx,hy,0]));
+      const hole = keep(makeCylinder(c.hole_diameter / 2, c.base_thickness + 2 * overshoot, [hx,hy,-overshoot]));
       copper = keep(copper.cut(hole));
     }
     const boss = keep(sketchRectangle(r.boss_length, r.boss_width, { origin: [cx,cy,c.base_thickness] }).extrude(r.boss_lower_height));

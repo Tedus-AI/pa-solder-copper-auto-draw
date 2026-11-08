@@ -4,7 +4,7 @@ import { calculate, defaults, fields, nativeJob } from '../src/design.js';
 import { getTolerance, toleranceDefaults, toleranceSource, toleranceText } from '../src/tolerances.js';
 import { copperFootprint, roundedBaseDistance } from '../src/copper-geometry.js';
 import { dimensionFor, referenceLevels } from '../src/dimensions.js';
-import { layoutGeometry, area } from '../src/layout.js';
+import { layoutGeometry } from '../src/layout.js';
 const near=(a,b,tol=1e-6)=>assert.ok(Math.abs(a-b)<tol,`${a} != ${b}`);
 
 test('source tolerances preserve asymmetric signs and distinguish unknown from zero',()=>{

@@ -28,14 +28,15 @@
 CuH = C + A + B - SPH - D + E
 lower_boss_height = CuH - K       (p6 E 與 p4 K 為同一小凸台高度)
 copper_to_flange = CuH + D - K
-V1-1 = (M*N + π*(O/2)²) * copper_to_flange
+A_O = 4 * ½π(O/2)² - lens   (lens: 同側兩半圓重疊，N ≥ 2O 時為 0)
+V1-1 = (M*N + A_O) * copper_to_flange
 V2 = H*I*(L-K) + 4*J²*K
 V1 = V1-1 - V2
 A1 = W*X - 2*Y²
 Z = V1/A1
 ```
 
-體積公式直接採 p12 的一個完整圓面積項；它代表 PDF 對 PCB relief 的總有效面積，不是四個完整圓孔。這一版不輸出 PCB 加工圖，避免把此體積等效模型誤當成完整 PCB relief 輪廓。
+避空面積 A_O 採 PCB 開孔實際的四個外側半圓（p7／p9）聯集面積，與網頁 Layout 輪廓及剖面圖一致。p12 原式只計一個完整圓 π(O/2)²，會使預設案例的錫厚低估約 2.9%（0.3748 → 0.3859 mm），故不再採用。
 
 基座本體不在 V2 範圍；V2 只計 PCB 開孔中的大凸台與四角小凸台。銅塊 STEP 總體積另加圓角基座，扣除兩個穿孔，並與 CAD kernel 的實體體積比對。
 
