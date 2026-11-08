@@ -6,6 +6,7 @@ import { dimensionFor, dimensionLabel, referenceLevels } from './dimensions.js';
 import { paReference } from './pa-reference.js';
 import { cameraView, createCADCamera } from './camera-views.js';
 import { annotationLayout, featureLeader, overlaps } from './annotation-layout.js';
+import { ARROW_LENGTH, ARROW_HALF_WIDTH, OUTSIDE_TAIL } from './dimension-arrows.js';
 
 const vec = p => new THREE.Vector3(...p);
 const svgNS='http://www.w3.org/2000/svg';
@@ -311,15 +312,19 @@ export class CADViewer {
     }
     const distance=Math.hypot(arrowB[0]-arrowA[0],arrowB[1]-arrowA[1]);
     if(!isEnvelope&&distance>.05){
-      const u=[(arrowB[0]-arrowA[0])/distance,(arrowB[1]-arrowA[1])/distance],n=[-u[1],u[0]],outward=!isRadius&&distance<22;
-      if(outward)line([[arrowA[0]-u[0]*11,arrowA[1]-u[1]*11],[arrowB[0]+u[0]*11,arrowB[1]+u[1]*11]]);
+      // Same rule as the calculation guide: too short for two inside arrows ->
+      // arrows sit outside both ends and point inward, tips on the extension lines.
+      const u=[(arrowB[0]-arrowA[0])/distance,(arrowB[1]-arrowA[1])/distance],n=[-u[1],u[0]],outward=!isRadius&&distance<2*ARROW_LENGTH+10,tail=ARROW_LENGTH+OUTSIDE_TAIL;
+      if(outward)line([[arrowA[0]-u[0]*tail,arrowA[1]-u[1]*tail],[arrowB[0]+u[0]*tail,arrowB[1]+u[1]*tail]]);
+      this.el.dataset.arrowPlacement=isRadius?'radius':outward?'outside':'inside';
       for(const [p,sign]of isRadius?[[arrowB,-1]]:[[arrowA,1],[arrowB,-1]]){
-        const dir=sign*(outward?-1:1),base=[p[0]+u[0]*dir*7,p[1]+u[1]*dir*7];
-        this.overlay.append(svgNode('polygon',{points:[p,[base[0]+n[0]*2.8,base[1]+n[1]*2.8],[base[0]-n[0]*2.8,base[1]-n[1]*2.8]].map(v=>v.join(',')).join(' '),class:'dimension-arrow'}));
+        const dir=sign*(outward?-1:1),base=[p[0]+u[0]*dir*ARROW_LENGTH,p[1]+u[1]*dir*ARROW_LENGTH];
+        this.overlay.append(svgNode('polygon',{points:[p,[base[0]+n[0]*ARROW_HALF_WIDTH,base[1]+n[1]*ARROW_HALF_WIDTH],[base[0]-n[0]*ARROW_HALF_WIDTH,base[1]-n[1]*ARROW_HALF_WIDTH]].map(v=>v.join(',')).join(' '),class:'dimension-arrow'}));
       }
     }
     for(const p of isEnvelope||isRadius?[layout.b]:[layout.a,layout.b]){
-      markers.append(svgNode('circle',{cx:p[0],cy:p[1],r:7,class:'dimension-halo'}),svgNode('circle',{cx:p[0],cy:p[1],r:3,class:'dimension-point'}));
+      // A small solid point marks the measured feature; no outer ring.
+      markers.append(svgNode('circle',{cx:p[0],cy:p[1],r:2.5,class:'dimension-point'}));
     }
     this.overlay.append(markers);
     if(layout.label){
@@ -361,7 +366,7 @@ export class CADViewer {
     }
     const changed=this.mode!==dimension.mode;this.mode=dimension.mode;
     this.clearAnnotation({keepEnvelope:true});this.key=key;this.activeDimension={...dimension,label:this.toleranceFocus===key?(dimension.toleranceLabel||dimensionLabel(dimension)):dimensionLabel(dimension)};
-    this.el.dataset.dimension=key;this.el.dataset.pulse=this.reduced?'static':'breathing';
+    this.el.dataset.dimension=key;
     if(changed||fit||envelopeVisible!==(dimension.kind==='envelope'))this.renderModels();
     this.onDimension(this.activeDimension);
     if(fit)this.setView(dimension.view);else this.updateAnnotation();
