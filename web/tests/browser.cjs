@@ -35,13 +35,13 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.22 mm','中：0.37 mm','上：0.52 mm']);
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.37');
     await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-selection.png')});
-    // Capture the fixed viewport after rendering. Canvas actionability waits
-    // can exceed 30 seconds during CI software-renderer warm-up.
+    // Read actual WebGL pixels in the render frame, before the drawing buffer
+    // is discarded. This avoids compositor screenshot stalls in headless CI.
     const captureGrid=async()=>{
       const before=await page.locator('#viewer').boundingBox();
-      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const data=await page.locator('#viewer canvas').evaluate(canvas=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(canvas.toDataURL('image/png'))))));
       const clip=await page.locator('#viewer').boundingBox();assert.deepEqual(clip,before,'The viewer viewport must remain stable');
-      return page.screenshot({clip});
+      const png=Buffer.from(data.split(',')[1],'base64');assert.ok(png.length>10000,'The captured WebGL frame must contain rendered geometry');return png;
     };
     const gridOn=await captureGrid();
     await page.locator('#view-grid').click();assert.equal(await page.locator('#view-grid').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'false');
