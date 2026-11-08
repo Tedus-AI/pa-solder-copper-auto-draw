@@ -105,7 +105,14 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('[data-guide-dimension="preform.trial_delta"]').count(),0);
     const guideDimensions=await page.locator('[data-guide-dimension]').evaluateAll(els=>els.map(el=>el.dataset.guideDimension));
     for(const key of guideDimensions){await page.locator(`[data-guide-dimension="${key}"]`).click();assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-dimension'),key);const component=key==='h'?'cavity':key.startsWith('pcb.')?'pcb':key.startsWith('preform.')?'preform':'copper';assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-visible-components'),component,'Only the selected physical component may remain visible');if(['pcb.opening_length','boss.total_height','preform.chamfer'].includes(key))await page.locator('.guide-inspector').screenshot({path:path.join(output,`inspector-${component}.png`)});}
-    assert.equal(await page.locator('.guide-dimension-overlay circle').first().evaluate(e=>getComputedStyle(e).animationName),'none');
+    // No ring markers: two arrowheads whose tips are the dimension endpoints.
+    assert.equal(await page.locator('.guide-dimension-overlay circle').count(),0);
+    assert.equal(await page.locator('.guide-dimension-overlay polygon').count(),2);
+    await page.locator('[data-guide-dimension="stack.pad_height"]').click();
+    assert.ok(Number(await page.locator('#guide-dimension-3d').getAttribute('data-dimension-zoom'))>10,'Thin K is zoomed so its arrows land visibly on both faces');
+    const kLength=await page.locator('.guide-dimension-overlay').evaluate(svg=>{const tips=[...svg.querySelectorAll('polygon')].map(p=>p.getAttribute('points').split(' ')[0].split(',').map(Number));return Math.hypot(tips[1][0]-tips[0][0],tips[1][1]-tips[0][1]);});
+    assert.ok(kLength>=40,`K must span a readable length, got ${kLength}px`);
+    await page.locator('[data-guide-dimension="preform.chamfer"]').click();
     await page.waitForTimeout(300);const staticInspector=await page.locator('#guide-dimension-3d').screenshot();await page.waitForTimeout(350);assert.deepEqual(await page.locator('#guide-dimension-3d').screenshot(),staticInspector,'Dimension inspector must remain static with no mesh or marker breathing');
     await page.locator('#guide-dimension-reset').click();assert.equal(await page.locator('#guide-dimension-3d').getAttribute('data-visible-components'),'preform');
     if(shardIndex===0){
@@ -199,46 +206,22 @@ async function withDeadline(operation,ms,label){
     for(const name of ['copper','preform','pcb'])await page.locator(`#ref-${name}`).check();
     await page.locator('#copper-base_thickness').focus();
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'copper.base_thickness');
-    assert.equal(await page.locator('#viewer').getAttribute('data-pulse'),'breathing');
     assert.match(await page.locator('#dimension-title').textContent(),/G = 3 \+0\/−0\.1 mm/);
-    // Wait for the earlier orbit drag to settle, then sample known animation
-    // phases. A slow software renderer can otherwise capture the same phase
-    // twice, even though the visible halo is correctly breathing.
-    await page.waitForFunction(()=>{
-      const halo=document.querySelector('.dimension-halo');if(!halo)return false;
-      const prior=window.__cadPulseStable;
-      if(prior?.halo!==halo){window.__cadPulseStable={halo,frames:0};return false;}
-      return ++prior.frames>=3;
-    },null,{timeout:60000});
-    const pulse=page.locator('.dimension-markers');
-    const animations=await pulse.evaluate(el=>el.getAnimations({subtree:true}).map(a=>({state:a.playState,duration:Number(a.effect.getComputedTiming().duration)})));
-    assert.ok(animations.length>0&&animations.every(a=>a.state==='running'&&a.duration>0),'Viewer halos must start animating automatically');
-    const pulsePhase=async fraction=>pulse.evaluate(async(el,f)=>{
-      const active=el.getAnimations({subtree:true});
-      await Promise.all(active.map(a=>{a.pause();return a.ready;}));
-      active.forEach(a=>a.currentTime=Number(a.effect.getComputedTiming().duration)*f);
-      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
-    },fraction);
-    await pulsePhase(0);
-    const frame1=await pulse.screenshot();
-    // The unboxed label has a transparent background: a screenshot also
-    // captures the WebGL grid behind it. Verify the actual text and ancestor
-    // presentation independently of GPU background rasterization.
+    // Dimension markers are plain: no outer ring, no breathing animation.
+    await page.waitForSelector('.dimension-markers');
+    assert.equal(await page.locator('.dimension-halo').count(),0,'No outer ring around dimension points');
+    assert.equal(await page.locator('#viewer .dimension-overlay').evaluate(el=>el.getAnimations({subtree:true}).length),0,'Dimension graphics must not animate');
     const textPresentation=()=>page.locator('.dimension-number').evaluate(el=>{
       const chain=[];for(let node=el;node;node=node.parentElement){const s=getComputedStyle(node);chain.push({opacity:s.opacity,filter:s.filter,animations:node.getAnimations({subtree:false}).length});}
       const s=getComputedStyle(el);return{text:el.textContent,fill:s.fill,fillOpacity:s.fillOpacity,chain};
     });
     const fixedText1=await textPresentation();
-    const haloOpacity1=await page.locator('.dimension-halo').first().evaluate(e=>Number(getComputedStyle(e).opacity));
-    await pulsePhase(.5);
-    const frame2=await pulse.screenshot();
-    assert.notDeepEqual(frame1,frame2,'The real viewer highlight must animate');
-    const haloOpacity2=await page.locator('.dimension-halo').first().evaluate(e=>Number(getComputedStyle(e).opacity));
-    assert.ok(haloOpacity2-haloOpacity1>.5,'Actual halo opacity must change at the two sampled phases');
-    assert.deepEqual(await textPresentation(),fixedText1,'Dimension text must not fade or pulse');
     assert.equal(fixedText1.fillOpacity,'1');
     assert.ok(fixedText1.chain.every(s=>s.opacity==='1'&&s.filter==='none'&&s.animations===0),'Text ancestors must not animate, fade or filter the value');
-    await pulse.evaluate(el=>{el.getAnimations({subtree:true}).forEach(a=>a.play());delete window.__cadPulseStable;});
+    // A short dimension (K) uses outside arrows pointing inward.
+    await page.locator('#stack-pad_height').focus();await page.waitForFunction(()=>document.getElementById('viewer').dataset.dimension==='stack.pad_height');
+    assert.equal(await page.locator('#viewer').getAttribute('data-arrow-placement'),'outside');
+    await page.locator('#copper-base_thickness').focus();await page.waitForFunction(()=>document.getElementById('viewer').dataset.dimension==='copper.base_thickness');
     const textStyle=await page.locator('.dimension-number').evaluate(el=>({fill:getComputedStyle(el).fill,opacity:getComputedStyle(el).opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}));
     assert.deepEqual(textStyle,{fill:'rgb(96, 41, 15)',opacity:'1',parentOpacity:'1'});
     await page.locator('#ref-epad').uncheck();
@@ -456,7 +439,7 @@ async function withDeadline(operation,ms,label){
     await review.close();
     assert.deepEqual(errors, []);
     const coverage=liveSmoke?'eight representative dimensions':shardCount>1?`${annotationNames.length} dimensions (shard ${shardIndex+1}/${shardCount})`:'all 32 dimensions';
-    console.log(`PASS: ${url} — ${coverage} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with breathing markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
+    console.log(`PASS: ${url} — ${coverage} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with plain markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
   } catch (e) {
     console.error(e);process.exitCode=1;
     let diagnostic='';
