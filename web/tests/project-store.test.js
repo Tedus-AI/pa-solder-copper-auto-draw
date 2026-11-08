@@ -43,3 +43,10 @@ test('unreadable and unsupported stored data stay intact instead of being silent
   const unavailable=new BrowserProjectStore({storage:{getItem(){throw new Error('SecurityError');}}});
   assert.throws(()=>unavailable.active(),/尚未儲存/);
 });
+
+test('project metadata validates on its own, without a full design', async () => {
+  const { normalizeProject } = await import('../src/design.js');
+  assert.deepEqual(normalizeProject({ name: '  RRU PA  ', pa_model: 'X1' }), { name: 'RRU PA', pa_model: 'X1' });
+  assert.throws(() => normalizeProject({ name: '' }), /專案名稱/);
+  assert.throws(() => normalizeProject({ name: 'a\nb' }), /單行/);
+});

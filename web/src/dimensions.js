@@ -1,5 +1,5 @@
 import {holeCenters} from './hole-corners.js';
-import { dimensionSpecs, formatDimension } from './dimension-format.js';
+import { dimensionSpecs } from './dimension-format.js';
 import { getTolerance, toleranceSuffix, toleranceText, toleranceSource } from './tolerances.js';
 export { dimensionLabel } from './dimension-format.js';
 

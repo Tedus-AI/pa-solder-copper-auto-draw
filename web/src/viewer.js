@@ -28,6 +28,12 @@ function dispose(group) {
 export class CADViewer {
   constructor(container,onMode=()=>{},onDimension=()=>{}) {
     this.el=container;this.onMode=onMode;this.onDimension=onDimension;
+    // Render on demand: every public method that can change the WebGL image
+    // requests one frame; an idle viewer then costs no GPU work.
+    this.needsRender=true;
+    for(const name of ['setDesign','renderModels','renderFallback','setMode','setReference','setGridVisible','setTransparency','setExploded','setView','fitCamera','clearAnnotation','selectTolerance','selectDimension']){
+      const method=this[name];this[name]=(...args)=>{const value=method.apply(this,args);this.requestRender();return value;};
+    }
     this.transparent={copper:false,preform:false,pcb:true,pa:false,epad:false};this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:false};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
     this.scene=new THREE.Scene();this.camera=createCADCamera();this.camera.position.set(50,-60,50);
     this.target=new THREE.Vector3();this.models=new THREE.Group();this.scene.add(this.models);
@@ -35,7 +41,8 @@ export class CADViewer {
     this.textMeasure=document.createElement('canvas').getContext('2d');this.textMeasure.font='650 13px system-ui, sans-serif';
     this.activeDimension=null;this.reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
     try {
-      this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0,0);
+      // preserveDrawingBuffer keeps the last on-demand frame readable (toDataURL / tests).
+      this.renderer=new THREE.WebGLRenderer({antialias:true,alpha:true,preserveDrawingBuffer:true});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.setClearColor(0,0);
       this.renderer.outputColorSpace=THREE.SRGBColorSpace;container.prepend(this.renderer.domElement);
       this.renderer.toneMapping=THREE.ACESFilmicToneMapping;this.renderer.toneMappingExposure=1.15;
       this.renderer.shadowMap.enabled=true;this.renderer.shadowMap.type=THREE.PCFSoftShadowMap;this.renderer.shadowMap.autoUpdate=false;
@@ -44,20 +51,22 @@ export class CADViewer {
       try{const room=new RoomEnvironment(),pmrem=new THREE.PMREMGenerator(this.renderer);this.scene.environment=pmrem.fromScene(room,.045,0.1,100,{size:128}).texture;this.scene.environmentIntensity=.72;room.dispose();pmrem.dispose();}catch{}
       this.controls=new OrbitControls(this.camera,this.renderer.domElement);this.controls.enableDamping=true;this.controls.dampingFactor=.12;
       this.controls.addEventListener('start',()=>this.markView('custom'));
-      this.controls.addEventListener('change',()=>this.updateAnnotation());
+      this.controls.addEventListener('change',()=>{this.requestRender();this.updateAnnotation();});
       this.controls.minDistance=.15;this.controls.maxDistance=3000;
       this.scene.add(new THREE.HemisphereLight(0xf6fbff,0x9a7e60,1.55));
       for(const[position,intensity,color]of[[[30,-42,65],3.2,0xffefdb],[[-40,15,30],1.2,0xdcecff],[[15,50,25],1.5,0xffffff]]){const light=new THREE.DirectionalLight(color,intensity);light.position.set(...position);this.scene.add(light);if(!this.keyLight){this.keyLight=light;light.castShadow=true;light.shadow.mapSize.set(1024,1024);light.shadow.bias=-.0001;light.shadow.normalBias=.035;}}
       const ground=new THREE.Mesh(new THREE.PlaneGeometry(240,240),new THREE.ShadowMaterial({color:0x34413a,opacity:.18}));ground.position.z=-.14;ground.receiveShadow=true;this.scene.add(ground);
       this.grid=new THREE.GridHelper(100,20,0xcbd6c6,0xe3e8dd);this.grid.rotation.x=Math.PI/2;this.grid.position.z=-.15;this.scene.add(this.grid);this.setGridVisible(true);
-      new ResizeObserver(()=>{const {width,height}=container.getBoundingClientRect();if(width&&height){this.renderer.setSize(width,height);this.fitCamera();}}).observe(container);
+      new ResizeObserver(()=>{const {width,height}=container.getBoundingClientRect();if(width&&height){this.renderer.setSize(width,height);this.fitCamera();this.requestRender();}}).observe(container);
       const animate=()=>{
         requestAnimationFrame(animate);
-        this.controls.update();this.renderer.render(this.scene,this.camera);
+        // update() returns true while orbit damping is still moving the camera.
+        if(this.controls.update()||this.needsRender){this.needsRender=false;this.renderer.render(this.scene,this.camera);}
       };requestAnimationFrame(animate);
     } catch {this.renderer=null;}
   }
 
+  requestRender(){this.needsRender=true;}
   setDesign(r,layout,parts=null) {
     this.r=r;this.layout=layout;this.parts=parts;this.renderModels();
     if(this.key)this.selectDimension(this.key,false,{tolerance:this.toleranceFocus===this.key});
@@ -183,7 +192,7 @@ export class CADViewer {
     this.controls=new OrbitControls(this.camera,this.renderer.domElement);this.controls.target.copy(this.target);
     this.controls.enableDamping=true;this.controls.dampingFactor=.12;this.controls.minZoom=.05;this.controls.maxZoom=40;
     this.controls.addEventListener('start',()=>this.markView('custom'));
-    this.controls.addEventListener('change',()=>this.updateAnnotation());
+    this.controls.addEventListener('change',()=>{this.requestRender();this.updateAnnotation();});
     this.fitCamera();this.controls.update();
   }
   fitCamera() {

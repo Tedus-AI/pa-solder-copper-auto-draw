@@ -2,9 +2,12 @@ import { octagon } from './design.js';
 import { formatDimension } from './dimension-format.js';
 import { copperFootprint } from './copper-geometry.js';
 import { toleranceSuffix } from './tolerances.js';
+import { dxfDocument, CENTER_LTYPE, CONTINUOUS } from './dxf-document.js';
 
 export function drawing(r, part) {
-  const out = [], put = (...pairs) => pairs.forEach(v => out.push(String(v)));
+  const layers = ['OUTLINE', 'BOSS', 'PAD', 'HOLES', 'SIDE', 'DIM', 'NOTES', 'CENTER'];
+  const doc = dxfDocument({ ltypes: [CENTER_LTYPE], layers: layers.map((name, i) => ({ name, color: name === 'CENTER' ? 8 : (i + 1) % 7 + 1, ltype: name === 'CENTER' ? 'CENTER' : CONTINUOUS })) });
+  const put = doc.put;
   const entity = (type, layer, subclass, ...pairs) => put(0, type, 100, 'AcDbEntity', 8, layer, 100, subclass, ...pairs);
   const dimension=(name,value,options={})=>formatDimension(name,value,{cad:true,...options});
   const tolerance=key=>toleranceSuffix(r.design,key).replaceAll('−','-');
@@ -31,13 +34,6 @@ export function drawing(r, part) {
     }
     text(label, (p1[0] + p2[0]) / 2 + (vertical?-.8:0), (p1[1] + p2[1]) / 2 + (vertical?0:.8), .85, 'DIM', vertical?90:0, true);
   };
-  put(0, 'SECTION', 2, 'HEADER', 9, '$ACADVER', 1, 'AC1024', 9, '$INSUNITS', 70, 4, 9, '$MEASUREMENT', 70, 1, 0, 'ENDSEC');
-  put(0, 'SECTION', 2, 'TABLES', 0, 'TABLE', 2, 'LTYPE', 5, '10', 330, '0', 100, 'AcDbSymbolTable', 70, 2, 0, 'LTYPE', 2, 'CONTINUOUS', 70, 0, 3, 'Solid line', 72, 65, 73, 0, 40, 0);
-  put(0,'LTYPE',2,'CENTER',70,0,3,'Center: long dash, gap, short dash, gap',72,65,73,4,40,4,49,2.4,74,0,49,-.6,74,0,49,.4,74,0,49,-.6,74,0,0,'ENDTAB');
-  const layers = ['0', 'OUTLINE', 'BOSS', 'PAD', 'HOLES', 'SIDE', 'DIM', 'NOTES','CENTER'];
-  put(0, 'TABLE', 2, 'LAYER', 5, '20', 330, '0', 100, 'AcDbSymbolTable', 70, layers.length);
-  layers.forEach((name, i) => put(0, 'LAYER', 2, name, 70, 0, 62, name==='CENTER'?8:i % 7 + 1, 6, name==='CENTER'?'CENTER':'CONTINUOUS'));
-  put(0, 'ENDTAB', 0, 'ENDSEC', 0, 'SECTION', 2, 'ENTITIES');
   const c = r.design.copper, I = r.boss_length, H = r.boss_width;
   const [bx,by]=r.boss_center||[0,0];
   const notes = [];
@@ -113,6 +109,5 @@ export function drawing(r, part) {
   }
   const startX = part === 'copper' ? c.base_length / 2 + 30 : I / 2 + 12;
   notes.forEach((v, i) => text(v, startX, 15 - i * 2, .9));
-  put(0, 'ENDSEC', 0, 'EOF');
-  return out.join('\n') + '\n';
+  return doc.toString();
 }

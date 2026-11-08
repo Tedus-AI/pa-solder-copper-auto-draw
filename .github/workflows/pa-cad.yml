@@ -3,7 +3,10 @@ name: PA CAD validation
 on:
   push:
     branches: [main, deploy/pa-copper-preform-cad]
-    paths: ['cad-app/**', '.github/workflows/pa-cad.yml']
+    # web/src is included: browser/Python parity and web DXF tests live here.
+    paths: ['cad-app/**', 'web/src/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
+  pull_request:
+    paths: ['cad-app/**', 'web/src/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
   workflow_dispatch:
 
 permissions:
@@ -17,6 +20,14 @@ jobs:
         working-directory: cad-app
     steps:
       - uses: actions/checkout@v4
+      # Parity tests import web/src/*.js with Node; they need its dependencies.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'

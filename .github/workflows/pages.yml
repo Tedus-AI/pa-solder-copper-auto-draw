@@ -9,13 +9,22 @@ on:
       - 'cad-app/src/pa_cad/creo.py'
       - 'cad-app/src/pa_cad/resources/**'
       - 'cad-app/examples/**'
+  # Pull requests run the same build and browser checks, but never deploy.
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/pages.yml'
+      - 'cad-app/src/pa_cad/creo.py'
+      - 'cad-app/src/pa_cad/resources/**'
+      - 'cad-app/examples/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-pages
+  # PR runs must not cancel a main-branch deployment.
+  group: ${{ github.event_name == 'pull_request' && format('pages-pr-{0}', github.ref) || 'github-pages' }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +45,8 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: npm ci
+      - run: npm run lint
+      - run: npm run format:check
       - run: npm test
       - run: npm run build
       - run: npx playwright install --with-deps chromium
@@ -51,14 +62,15 @@ jobs:
           path: web/test-results
           if-no-files-found: ignore
       - uses: actions/configure-pages@v5
-        if: matrix.annotation_shard == 0
+        if: matrix.annotation_shard == 0 && github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v3
-        if: matrix.annotation_shard == 0
+        if: matrix.annotation_shard == 0 && github.event_name != 'pull_request'
         with:
           path: web/dist
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       pages: write

@@ -1,6 +1,8 @@
 import {volumeGuideGeometry,scaledSection,VolumeGuide3D} from './volume-guide.js';
 // The guide reads the same calculated result used by preview and export.
-// PDF p12 defines an equivalent relief area; do not replace it with mesh area.
+// The relief term is the exact union area of the four outward half-discs drawn
+// on p7/p9 (analytic, not mesh). PDF p12/p13 used one full circle π(O/2)²;
+// the `reference` column keeps the PDF example only where the formula is unchanged.
 const f=(value,digits=4)=>Number(value).toFixed(digits).replace(/\.?0+$/,'')||'0';
 const svgText=(x,y,text,extra='')=>`<text x="${x}" y="${y}" ${extra}>${text}</text>`;
 export function calculationWorksheet(r){
@@ -8,21 +10,22 @@ export function calculationWorksheet(r){
   return [
     ['M','PCB 開窗長度',b.opening_length,20.9,'mm','左側 PCB 開孔'],
     ['N','PCB 開窗寬度',b.opening_width,10.1,'mm','左側 PCB 開孔'],
-    ['O','避空孔徑',b.relief_diameter,2,'mm','依第12頁使用等效圓面積'],
+    ['O','避空孔徑',b.relief_diameter,2,'mm','PCB 開孔四個外側半圓'],
+    ['Aₒ','避空半圓面積',r.relief_area,2*Math.PI,'mm²','4 × ½π(O/2)²（同側半圓重疊時扣除重疊）'],
     ['h','基座至 PA 底面高度',r.copper_to_flange,.63,'mm','L + D − K（第6頁）'],
-    ['V₁₋₁','容腔體積',r.cavity_volume,134.966,'mm³','[M × N + π × (O / 2)²] × h'],
+    ['V₁₋₁','容腔體積',r.cavity_volume,136.945,'mm³','[M × N + Aₒ] × h'],
     ['H','中凸台寬度',r.boss_width,9.8,'mm','中凸台設計尺寸'],
     ['I','中凸台長度',r.boss_length,20.6,'mm','中凸台設計尺寸'],
     ['J','小凸台邊長',c.pad_size,1.5,'mm','共4個 J × J'],
     ['K','小凸台高度',s.pad_height,.15,'mm','中凸台上的局部高度'],
     ['L','中凸台總高',r.boss_total_height,.48,'mm','C + A + B − SPH − D + K'],
     ['V₂','銅凸台占用體積',r.boss_volume,67.970,'mm³','H × I × (L − K) + 4 × J² × K'],
-    ['V₁','所需錫量',r.solder_volume,66.996,'mm³','V₁₋₁ − V₂'],
+    ['V₁','所需錫量',r.solder_volume,68.975,'mm³','V₁₋₁ − V₂'],
     ['W','錫片長度',t.length,20.6,'mm','跟隨中凸台 I'],
     ['X','錫片寬度',t.width,9.8,'mm','跟隨中凸台 H'],
     ['Y','45° 削角尺寸',t.chamfer,3.4,'mm','Y = round(2J + √2 × 0.2828, 2) mm'],
     ['A₁','削角後錫片面積',r.preform_area,178.760,'mm²','W × X − 4 × (Y² / 2)'],
-    ['Z','計算錫厚',r.calculated_thickness,.3748,'mm','V₁ / A₁'],
+    ['Z','計算錫厚',r.calculated_thickness,.3859,'mm','V₁ / A₁'],
     ['ΔZ','試片厚度增減量',t.trial_delta,.15,'mm','固定增減0.15 mm'],
   ].map(([symbol,label,value,reference,unit,formula])=>({symbol,label,value,reference,unit,formula}));
 }
@@ -36,14 +39,14 @@ function areaDiagram(r){
 const rowKeys={M:'pcb.opening_length',N:'pcb.opening_width',O:'pcb.relief_diameter',h:'h',H:'boss.width',I:'boss.length',J:'copper.pad_size',K:'stack.pad_height',L:'boss.total_height',W:'preform.length',X:'preform.width',Y:'preform.chamfer'};
 export const inspectorRows=r=>calculationWorksheet(r).filter(row=>rowKeys[row.symbol]).map(row=>({...row,key:rowKeys[row.symbol]}));
 function guideContent(r){
- const {pcb:b,copper:c,stack:s,preform:t}=r.design;
+ const {preform:t}=r.design;
  const rows=inspectorRows(r).map(row=>`<tr><td><button type="button" data-guide-dimension="${row.key}" title="${row.formula}"><b>${row.symbol}</b> ${row.label}</button></td><td>${row.symbol==='Y'?row.value.toFixed(2):f(row.value,6)} ${row.unit}</td></tr>`).join('');
  return `<div class="guide-workspace"><section class="guide-explanation"><div class="guide-summary"><span>錫量 V₁ = <b>${f(r.solder_volume,3)} mm³</b></span><span>面積 A₁ = <b>${f(r.preform_area,3)} mm²</b></span><strong>計算 Z = ${f(r.calculated_thickness,6)} mm</strong></div>
  <div class="guide-layers" role="group" aria-label="體積圖解顯示"><button type="button" data-guide-layer="all" aria-pressed="true">組裝剖面</button><button type="button" data-guide-layer="cavity" aria-pressed="false">容腔 V₁₋₁</button><button type="button" data-guide-layer="copper" aria-pressed="false">銅凸台 V₂</button><button type="button" data-guide-layer="solder" aria-pressed="false">錫料 V₁</button></div>
  <div class="guide-geometry"><div class="guide-section-column"><div id="guide-section" data-layer="all"></div><label class="guide-zoom">等比放大 <input id="guide-section-zoom" type="range" min="1" max="6" step=".25" value="1"><output id="guide-zoom-value">1×</output></label></div><div class="guide-isometric"><div id="guide-volume-3d"></div><p class="guide-caption"><span class="volume-key cavity-key">藍：容腔</span> <span class="volume-key solder-key">紅：錫料</span> · 所選體積實體呼吸，其餘零件半透明</p></div></div>
  <div class="guide-area">${areaDiagram(r)}<p><b>A₁ = W × X − 2 × Y²</b><br>= ${f(t.length)} × ${f(t.width)} − 2 × ${t.chamfer.toFixed(2)}²<br>= ${f(r.preform_area,3)} mm²</p><p>45°削角自動跟隨小凸台 J<br><b>Y = round(2J + √2 × 0.2828, 2)</b><br>間隙基準 <b>0.2828 mm</b>，Y 取小數第二位<br>取位後實際間隙 ${f(r.corner_clearance,6)} mm</p></div>
- <div class="guide-steps"><article><h3>① 容腔 V₁₋₁</h3><p>銅塊基座上表面至 PA 底面的空間。</p><code>h = L + D − K = ${f(r.copper_to_flange)} mm<br>V₁₋₁ = [M × N + π(O/2)²] × h<br>= ${f(r.cavity_volume,3)} mm³</code></article><article><h3>② 扣掉銅凸台 V₂</h3><code>V₂ = H × I × (L − K) + 4J²K<br>= ${f(r.boss_volume,3)} mm³<br>V₁ = V₁₋₁ − V₂ = ${f(r.solder_volume,3)} mm³</code><p>扣除中凸台及四個小凸台。</p></article><article><h3>③ 錫量除以錫片面積</h3><code>Z = V₁ / A₁<br>= ${f(r.solder_volume,3)} / ${f(r.preform_area,3)}<br>= ${f(r.calculated_thickness,6)} mm</code><p>三款試片：${r.trial_thicknesses.map(v=>f(v,4)).join('／')} mm<br>目前模型：<b>${f(r.model_thickness,6)} mm</b> · ${r.trial_status==='locked'?'已鎖定驗證結果':r.trial_status==='stale'?'尺寸變更，需重新驗證':'未鎖定'}</p></article></div>
- <p class="guide-source">圖面使用實際比例；薄層可等比放大，標籤固定保留在畫面內。錫量依 PDF 第12頁的等效避空面積 π(O/2)² 計算，與實際四個側向半圓輪廓分別處理。</p></section>
+ <div class="guide-steps"><article><h3>① 容腔 V₁₋₁</h3><p>銅塊基座上表面至 PA 底面的空間。</p><code>h = L + D − K = ${f(r.copper_to_flange)} mm<br>Aₒ = 4 × ½π(O/2)² = ${f(r.relief_area,3)} mm²<br>V₁₋₁ = [M × N + Aₒ] × h<br>= ${f(r.cavity_volume,3)} mm³</code></article><article><h3>② 扣掉銅凸台 V₂</h3><code>V₂ = H × I × (L − K) + 4J²K<br>= ${f(r.boss_volume,3)} mm³<br>V₁ = V₁₋₁ − V₂ = ${f(r.solder_volume,3)} mm³</code><p>扣除中凸台及四個小凸台。</p></article><article><h3>③ 錫量除以錫片面積</h3><code>Z = V₁ / A₁<br>= ${f(r.solder_volume,3)} / ${f(r.preform_area,3)}<br>= ${f(r.calculated_thickness,6)} mm</code><p>三款試片：${r.trial_thicknesses.map(v=>f(v,4)).join('／')} mm<br>目前模型：<b>${f(r.model_thickness,6)} mm</b> · ${r.trial_status==='locked'?'已鎖定驗證結果':r.trial_status==='stale'?'尺寸變更，需重新驗證':'未鎖定'}</p></article></div>
+ <p class="guide-source">圖面使用實際比例；薄層可等比放大，標籤固定保留在畫面內。避空面積 Aₒ 依 PCB 開孔實際的四個外側半圓計算（同側重疊時扣除），與剖面及 Layout 輪廓一致；PDF 第12頁原式只計一個整圓 π(O/2)²。</p></section>
  <aside class="guide-inspector"><div class="guide-inspector-heading"><strong>尺寸定位</strong><button id="guide-dimension-reset" type="button">等角 ↗</button></div><div id="guide-inspector-label">點選下方尺寸，在圖中定位</div><div id="guide-dimension-3d"></div><div class="guide-table-scroll"><table class="guide-table"><thead><tr><th>尺寸／用途</th><th>目前數值</th></tr></thead><tbody>${rows}</tbody></table></div><p class="guide-caption">點選尺寸定位 · 拖曳旋轉／滾輪縮放</p></aside></div>`;
 }
 export function createCalculationGuide(getResult){
