@@ -35,9 +35,17 @@ const { unzipSync, strFromU8 } = require('fflate');
     assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.22 mm','中：0.37 mm','上：0.52 mm']);
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.37');
     await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-selection.png')});
-    const gridOn=await page.locator('#viewer canvas').screenshot();
+    // Capture the fixed viewport after rendering. Canvas actionability waits
+    // can exceed 30 seconds during CI software-renderer warm-up.
+    const captureGrid=async()=>{
+      const before=await page.locator('#viewer').boundingBox();
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const clip=await page.locator('#viewer').boundingBox();assert.deepEqual(clip,before,'The viewer viewport must remain stable');
+      return page.screenshot({clip});
+    };
+    const gridOn=await captureGrid();
     await page.locator('#view-grid').click();assert.equal(await page.locator('#view-grid').getAttribute('aria-pressed'),'false');assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'false');
-    const gridOff=await page.locator('#viewer canvas').screenshot({path:path.join(output,'grid-hidden.png')});assert.notDeepEqual(gridOff,gridOn,'Grid toggle must change the rendered background');
+    const gridOff=await captureGrid();fs.writeFileSync(path.join(output,'grid-hidden.png'),gridOff);assert.notDeepEqual(gridOff,gridOn,'Grid toggle must change the rendered background');
     await page.locator('#view-iso-bottom').click();assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'false');await page.locator('#view-iso').click();await page.locator('#view-grid').click();assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'true');assert.equal(await page.locator('#download-zip').isDisabled(),false);
     assert.ok(await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight+1));
     await page.screenshot({path:path.join(output,'initial-desktop.png'),fullPage:true});
