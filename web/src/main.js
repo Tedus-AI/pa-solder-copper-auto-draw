@@ -510,7 +510,7 @@ $('download-zip').addEventListener('click', async () => {
     const r = snapshot.results, files = {};
     files['layout_solder_mask.dxf'] = strToU8(layoutDxf(r, snapshot.layout));
     const sheet = drawingOptions();
-    files['copper_drawing.dxf'] = strToU8(copperDrawingDxf(r, await loadDrawingTemplate(), sheet));
+    files['copper_drawing.dxf'] = copperDrawingDxf(r, await loadDrawingTemplate(), sheet); // Big5 bytes, as the reference
     for (const [name, model] of Object.entries(snapshot.parts)) {
       files[`${name}.step`] = new Uint8Array(await model.step.arrayBuffer());
       files[`${name}.stl`] = new Uint8Array(await model.stl.arrayBuffer());
