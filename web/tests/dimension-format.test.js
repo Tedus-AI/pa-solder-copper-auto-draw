@@ -40,5 +40,5 @@ test('downloaded drawing notation retains codes, units and CAD glyphs',()=>{
   assert.ok(copper.includes('4-R = 3.00 mm'));
   assert.ok(copper.includes('L = 0.48 +0/-0.1 mm'));
   assert.ok(preform.includes('W = 20.6 %%p0.1 mm'));assert.ok(preform.includes('4-Y = 3.40 +0.2/-0 mm'));
-  assert.ok(layout.includes('R = 1 mm'));assert.ok(layout.includes('2-%%cV = 4.00 mm'));
+  assert.ok(layout.includes('\n20.00 mm\n'));assert.ok(layout.includes('\n15.00 mm\n'));assert.ok(!layout.includes('%%cV'));
 });

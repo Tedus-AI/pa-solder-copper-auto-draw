@@ -225,5 +225,7 @@ writeFileSync(out+'/copper.dxf',drawing(r,'copper'));writeFileSync(out+'/preform
         assert set(doc.layouts.names()) == {"Model", "Layout1"}
         assert "CENTER" in doc.linetypes
         types = collections.Counter(e.dxftype() for e in doc.modelspace())
-        assert types["TEXT"] > 5 and types["LWPOLYLINE"] >= 2, (name, types)
+        assert types["LWPOLYLINE"] >= 2, (name, types)
+        # Part drawings carry notes; the Layout only the two PA-centre distances.
+        assert types["TEXT"] == 2 if name == "layout" else types["TEXT"] > 5, (name, types)
     assert collections.Counter(e.dxftype() for e in ezdxf.readfile(tmp_path / "layout.dxf").modelspace())["HATCH"] > 100
