@@ -107,7 +107,9 @@ async function withDeadline(operation,ms,label){
     const volumeBox=await volumeView.boundingBox();
     await page.mouse.move(volumeBox.x+volumeBox.width/2,volumeBox.y+volumeBox.height/2);await page.mouse.down();await page.mouse.move(volumeBox.x+volumeBox.width/2+120,volumeBox.y+volumeBox.height/2+40,{steps:6});await page.mouse.up();
     await page.waitForTimeout(400);assert.notDeepEqual(await volumeView.locator('canvas').screenshot(),isoDefault,'Dragging must rotate the volume view');
-    await page.locator('#guide-volume-reset').click();await page.waitForTimeout(600);
+    // Move the pointer off the overlaid button: its :hover background would
+    // otherwise appear in the element screenshot even with a perfect reset.
+    await page.locator('#guide-volume-reset').click();await page.mouse.move(0,0);await page.waitForTimeout(600);
     assert.equal(await volumeView.getAttribute('data-camera-view'),'iso');
     assert.deepEqual(await volumeView.locator('canvas').screenshot(),isoDefault,'等角 button restores the default isometric view');
     assert.equal(await page.locator('details[data-group=preform] #calculation-guide-open').count(),1);
