@@ -229,3 +229,36 @@ writeFileSync(out+'/copper.dxf',drawing(r,'copper'));writeFileSync(out+'/preform
         # Part drawings carry notes; the Layout only the two PA-centre distances.
         assert types["TEXT"] == 2 if name == "layout" else types["TEXT"] > 5, (name, types)
     assert collections.Counter(e.dxftype() for e in ezdxf.readfile(tmp_path / "layout.dxf").modelspace())["HATCH"] > 100
+
+
+def test_browser_copper_drawing_is_a_complete_r2000_document_in_the_company_format(tmp_path):
+    """The 2D drawing (format of drawing 348001J40001) loads strictly, passes the audit,
+    is written in the reference code page and fills the title block and cover."""
+    import collections
+    import shutil
+    if not shutil.which("node"):
+        pytest.skip("node is required to run the browser DXF writers")
+    source = """import{calculate,defaults}from'./web/src/design.js';import{copperDrawingDxf}from'./web/src/copper-drawing.js';
+import{readFileSync,writeFileSync}from'node:fs';const out=process.argv[1],date=new Date(2026,10,9);
+const t=JSON.parse(readFileSync('./web/public/drawing/copper-drawing-template.json','utf8'));
+const d=structuredClone(defaults);d.project={...d.project,name:'RRU 基地台 PA'};const r=calculate(d);
+writeFileSync(out+'/cover.dxf',copperDrawingDxf(r,t,{cover:true,date}));writeFileSync(out+'/sheet.dxf',copperDrawingDxf(r,t,{cover:false,date}));"""
+    subprocess.run(["node", "--input-type=module", "-e", source, str(tmp_path)], cwd=Path(__file__).parents[2], check=True)
+    for name, sheets in (("cover", "2"), ("sheet", "1")):
+        doc = ezdxf.readfile(tmp_path / f"{name}.dxf")
+        assert doc.dxfversion == "AC1015" and doc.encoding == "cp950"
+        audit = doc.audit()
+        assert not audit.errors and not audit.fixes, (name, audit.errors, audit.fixes)
+        msp = doc.modelspace()
+        texts = [t.dxf.text.strip() for t in msp.query("TEXT")]
+        assert texts.count("RRU 基地台 PA") == int(sheets)  # USED ON on every sheet
+        for value in ("348XXXXXXX", "Cu base 40*30*3.48", "2026/11/9", "截面", "細節", "查看細節", "00"):
+            assert value in texts, (name, value)
+        assert ("1.發行圖面" in texts) == (name == "cover") and "修改銅塊尺寸" not in texts
+        sheet_no = [t.dxf.text for t in msp.query("TEXT")
+                    if abs(t.dxf.insert.y - 8) < 1e-6 and 95 < t.dxf.insert.x < 106 and t.dxf.text.isdigit()]
+        assert sheet_no == [sheets, sheets]
+        dims = msp.query("DIMENSION")
+        assert len(dims) == 16 and all(dim.dxf.geometry in doc.blocks for dim in dims)
+        types = collections.Counter(e.dxftype() for e in msp)
+        assert types["HATCH"] == 1 and types["LEADER"] == 5 and types["ARC"] == 4, types

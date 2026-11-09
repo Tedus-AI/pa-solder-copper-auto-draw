@@ -7,6 +7,7 @@ import { faceViews } from './camera-views.js';
 import { formatDimension } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
+import { copperDrawingDxf, drawingLayout, DRAWING_TEMPLATE_PATH, DEFAULT_PART_NO } from './copper-drawing.js';
 import { CADViewer } from './viewer.js';
 import { ProjectDatabase } from './project-db.js';
 import { LocalFileDb } from './local-file-db.js';
@@ -21,6 +22,8 @@ let worker, pending, counter=0, revision=0, result=null, draft=null, part='coppe
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial();
 const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 const downloadButtons=['download-zip','download-dxf','download-step'];
+// Downloads made from the live preview (no CAD model needed): Layout and the 2D drawing.
+const setDraftDownloads=disabled=>['download-layout','download-drawing'].forEach(id=>$(id).disabled=disabled);
 const formulaButtons=new Map();let activeFormulaButton=null;
 const calculationIds=new Set(['metric-z','metric-model','metric-volume','v-cavity','v-boss','v-area','trials']);
 const openCalculationGuide=createCalculationGuide(()=>calculate(syncLinkedFields(formValues())));
@@ -227,13 +230,13 @@ function refreshPreview(showError=false){
   try{
     const r=calculate(syncLinkedFields(formValues())),layout=layoutFor(r);draft={results:r,layout};
     viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
-    $('download-layout').disabled=false;$('viewer').dataset.previewValid='true';
+    setDraftDownloads(false);$('viewer').dataset.previewValid='true';
     $('model-size').textContent=[['E',r.design.copper.base_length],['F',r.design.copper.base_width],['G',r.design.copper.base_thickness]].map(([name,value])=>formatDimension(name,value)).join(' · ');
     return draft;
-  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';$('download-layout').disabled=true;$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
+  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';setDraftDownloads(true);$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
 }
 function invalidate(){
-  revision++;result=null;error('');downloadButtons.forEach(id=>$(id).disabled=true);$('download-layout').disabled=true;
+  revision++;result=null;error('');downloadButtons.forEach(id=>$(id).disabled=true);setDraftDownloads(true);
   document.body.classList.remove('ready');$('viewer').dataset.ready='false';$('preview-state').textContent='即時預覽 · 出圖待更新';
   clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；按「建立出圖模型」後下載3D零件');},140);
 }
@@ -243,7 +246,7 @@ function invalidate(){
 function syncProjectMetadata(){
   const project=normalizeProject({name:$('project-name').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()});
   for(const value of [result,draft])if(value?.results?.design)value.results.design.project=structuredClone(project);
-  projectMetadataValid=true;downloadButtons.forEach(id=>$(id).disabled=!result);$('download-layout').disabled=!draft;
+  projectMetadataValid=true;downloadButtons.forEach(id=>$(id).disabled=!result);setDraftDownloads(!draft);
   return project;
 }
 function markDirty(message='有未儲存的變更'){projectDirty=true;projectMessage(message);}
@@ -307,7 +310,7 @@ $('project-delete').addEventListener('click',()=>{
 $('design-form').addEventListener('input',event=>{
   if(['project-name','pa-brand','pa-model'].includes(event.target.id)){
     try{syncProjectMetadata();markDirty();}
-    catch(e){projectMetadataValid=false;downloadButtons.forEach(id=>$(id).disabled=true);$('download-layout').disabled=true;projectMessage(e.message,true);}
+    catch(e){projectMetadataValid=false;downloadButtons.forEach(id=>$(id).disabled=true);setDraftDownloads(true);projectMessage(e.message,true);}
     return;
   }
   invalidate();markDirty();
@@ -471,6 +474,27 @@ $('design-form').addEventListener('submit',async event=>{
 $('download-layout').addEventListener('click',()=>{
   clearTimeout(previewTimer);const current=refreshPreview(true);if(current)save(layoutDxf(current.results,current.layout),`${current.results.design.name}_layout_solder_mask.dxf`);
 });
+// Copper 2D drawing in the company format (drawing 348001J40001): the format
+// template is fetched once, on the first export. The cover choice is remembered.
+const COVER_KEY='pa-copper-cad.drawing-cover';
+let drawingTemplate=null;
+function loadDrawingTemplate(){
+  drawingTemplate??=fetch(base+DRAWING_TEMPLATE_PATH).then(response=>{
+    if(!response.ok)throw new Error(`圖面範本下載失敗（${response.status}），請重新整理網站。`);
+    return response.json();
+  }).catch(e=>{drawingTemplate=null;throw e;});
+  return drawingTemplate;
+}
+try{const stored=localStorage.getItem(COVER_KEY);if(stored!==null)$('drawing-cover').checked=stored==='1';}catch{/* storage unavailable: keep the default */}
+$('drawing-cover').addEventListener('change',event=>{try{localStorage.setItem(COVER_KEY,event.target.checked?'1':'0');}catch{/* not remembered */}});
+const drawingOptions=()=>({cover:$('drawing-cover').checked,partNo:DEFAULT_PART_NO});
+$('download-drawing').addEventListener('click',async()=>{
+  clearTimeout(previewTimer);const current=refreshPreview(true);if(!current)return;
+  $('download-drawing').disabled=true;
+  try{save(copperDrawingDxf(current.results,await loadDrawingTemplate(),drawingOptions()),`${current.results.design.name}_copper_drawing.dxf`);}
+  catch(e){error(`2D 圖面產生失敗：${e.message}`);}
+  finally{$('download-drawing').disabled=!draft;}
+});
 function save(data, name) {
   const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
@@ -485,6 +509,8 @@ $('download-zip').addEventListener('click', async () => {
   try {
     const r = snapshot.results, files = {};
     files['layout_solder_mask.dxf'] = strToU8(layoutDxf(r, snapshot.layout));
+    const sheet = drawingOptions();
+    files['copper_drawing.dxf'] = copperDrawingDxf(r, await loadDrawingTemplate(), sheet); // Big5 bytes, as the reference
     for (const [name, model] of Object.entries(snapshot.parts)) {
       files[`${name}.step`] = new Uint8Array(await model.step.arrayBuffer());
       files[`${name}.stl`] = new Uint8Array(await model.stl.arrayBuffer());
@@ -496,6 +522,8 @@ $('download-zip').addEventListener('click', async () => {
       native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
     report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange and six pins follow illustrative datasheet proportions; SPH fixes the lead reference plane. Only PA length, width, tolerance and SPH affect manufacturing calculations.' };
     report.layout = layoutReport(snapshot.layout, r);
+    const view = drawingLayout(r);
+    report.drawing = { file: 'copper_drawing.dxf', format: 'Delta drawing format of 348001J40001 (DXF R2000)', cover_sheet: sheet.cover, sheets: sheet.cover ? 2 : 1, revision: '00', part_no: sheet.partNo, view_scale: view.label, detail_scale: view.detail.label };
     files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));
     for (const path of ['creo_runner.py', 'WINDOWS_CREO7.md', 'THIRD_PARTY_LICENSES.txt']) {
