@@ -70,7 +70,7 @@ def test_project_display_metadata_roundtrips_without_changing_design_geometry(da
     data["project"] = {"name": "  基地台 PA 專案 / A  ", "pa_model": '  H-37248KC-6/2 "Rev A"  '}
     updated = Design.from_mapping(data)
     assert updated.name == original.name
-    assert updated.to_mapping()["project"] == {"name": "基地台 PA 專案 / A", "pa_model": 'H-37248KC-6/2 "Rev A"'}
+    assert updated.to_mapping()["project"] == {"name": "基地台 PA 專案 / A", "pa_model": 'H-37248KC-6/2 "Rev A"', "pa_brand": ""}
     assert calculate(updated) == original_result
     assert Design.from_mapping(updated.to_mapping()) == updated
     data["project"]["pa_model"] = " "
@@ -224,6 +224,8 @@ def _node(source):
 
 def _parity_cases(data):
     cases = {"example": deepcopy(data)}
+    c = deepcopy(data); c["project"] = {"name": "RRU 專案", "pa_brand": " NXP ", "pa_model": "X"}; cases["project_with_brand"] = c
+    c = deepcopy(data); c["project"] = {"name": "RRU", "pa_vendor": "NXP"}; cases["unknown_project_field_rejected"] = c
     c = deepcopy(data); c["pcb"] = {k: v for k, v in c["pcb"].items() if k not in ("opening_length", "opening_width")}
     cases["no_opening_dims_is_auto"] = c
     c = deepcopy(data); c["pcb"]["opening_mode"] = "auto"; c["pcb"]["opening_rule"] = "ampleon"

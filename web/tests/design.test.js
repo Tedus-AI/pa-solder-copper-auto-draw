@@ -27,10 +27,12 @@ test('name and unknown settings rejected', () => {
 });
 test('project metadata preserves human names independently of native CAD names',()=>{
   const d=structuredClone(defaults);d.project={name:'  基地台 PA 專案 A  ',pa_model:' PA型號/780 M1P '};
-  const r=calculate(d);assert.deepEqual(r.design.project,{name:'基地台 PA 專案 A',pa_model:'PA型號/780 M1P'});
+  const r=calculate(d);assert.deepEqual(r.design.project,{name:'基地台 PA 專案 A',pa_brand:'',pa_model:'PA型號/780 M1P'});
+  assert.equal(calculate({...defaults,project:{name:'測試',pa_brand:' NXP ',pa_model:'X'}}).design.project.pa_brand,'NXP');
+  assert.throws(()=>calculate({...defaults,project:{name:'測試',pa_brand:'a'.repeat(101)}}),/PA 品牌/);
   assert.equal(r.design.name,'pa_780_m1p');assert.deepEqual(nativeJob(r).design.project,r.design.project);
   const old=structuredClone(defaults);delete old.project;assert.deepEqual(calculate(old).design.project,defaults.project);
-  for(const project of [null,[],{name:''},{name:null},{pa_model:1},{name:'a\nb'},{name:'a'.repeat(101)},{surprise:true}])assert.throws(()=>calculate({...defaults,project}),/專案|型號/);
+  for(const project of [null,[],{name:''},{name:null},{pa_model:1},{pa_brand:1},{name:'a\nb'},{name:'a'.repeat(101)},{surprise:true}])assert.throws(()=>calculate({...defaults,project}),/專案|型號|品牌/);
   assert.equal(calculate({...defaults,project:{name:'測試',pa_model:''}}).design.project.pa_model,'');
 });
 

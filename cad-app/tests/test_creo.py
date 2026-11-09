@@ -27,7 +27,7 @@ def test_project_metadata_is_preserved_without_driving_native_geometry(job):
     r = calculate(d)
     updated = prepare_job(d.to_mapping(), asdict(r),
                           {part: job["expected"][part]["volume"] for part in ("copper", "preform")})
-    assert updated["design"]["project"] == {"name": "基地台 PA 專案 / A", "pa_model": "H-37248KC-6/2"}
+    assert updated["design"]["project"] == {"name": "基地台 PA 專案 / A", "pa_model": "H-37248KC-6/2", "pa_brand": ""}
     assert updated["native_parameters"] == job["native_parameters"]
     assert updated["name"] == job["name"]
     validate_job(updated)

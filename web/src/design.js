@@ -5,7 +5,7 @@ import { copperFootprint, roundedBaseDistance } from './copper-geometry.js';
 
 export const defaults = {
   name: 'pa_780_m1p',
-  project: { name: '未命名專案', pa_model: 'H-37248KC-6/2' },
+  project: { name: '未命名專案', pa_brand: '', pa_model: 'H-37248KC-6/2' },
   package: { length: 20.57, width: 9.78, max_tolerance: 0.127, support_height: 1.57 },
   pcb: {
     opening_length: 20.9,
@@ -141,7 +141,8 @@ export function reliefArea(b) {
   return 2 * Math.PI * r * r - lens;
 }
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-// Project metadata only (display name and PA model); independent of geometry.
+// Project metadata only (display name, PA brand and model); independent of geometry.
+const PROJECT_LABELS = { name: '專案名稱', pa_brand: 'PA 品牌', pa_model: 'PA 型號' };
 export function normalizeProject(project) {
   const result = structuredClone(defaults.project);
   check(project && typeof project === 'object' && !Array.isArray(project), '專案資料須為設定物件。');
@@ -151,12 +152,12 @@ export function normalizeProject(project) {
     check(
       // eslint-disable-next-line no-control-regex -- project text must be a single printable line
       typeof value === 'string' && !/[\u0000-\u001f\u007f]/.test(value),
-      `${key === 'name' ? '專案名稱' : 'PA 型號'}須為單行文字。`,
+      `${PROJECT_LABELS[key]}須為單行文字。`,
     );
     result[key] = value.trim();
     check(
       result[key].length <= 100 && (key !== 'name' || result[key].length > 0),
-      `${key === 'name' ? '專案名稱' : 'PA 型號'}長度須為${key === 'name' ? '1' : '0'}至100字。`,
+      `${PROJECT_LABELS[key]}長度須為${key === 'name' ? '1' : '0'}至100字。`,
     );
   }
   return result;

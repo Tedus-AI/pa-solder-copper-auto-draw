@@ -107,6 +107,7 @@ class Project:
     """Display metadata; independent of the safe CAD file name and geometry."""
     name: str = "未命名專案"
     pa_model: str = "H-37248KC-6/2"
+    pa_brand: str = ""  # last, so positional Project(name, pa_model) keeps working
 
 
 @dataclass(frozen=True)
@@ -138,7 +139,7 @@ class Design:
         project_data = data.get("project", {})
         if not isinstance(project_data, dict):
             raise ValueError("project 必須是 mapping")
-        if unknown := set(project_data)-{"name", "pa_model"}:
+        if unknown := set(project_data)-{"name", "pa_brand", "pa_model"}:
             raise ValueError(f"未知專案欄位: {sorted(unknown)}")
         project_values = asdict(Project())
         for key, value in project_data.items():

@@ -185,3 +185,65 @@
 
 /* Emphasize the validated trial result without growing the compact form. */
 .trial-selection{margin:2px 5px 4px;padding:2px 4px 3px;border:1px solid #d9ad63;border-left:4px solid #bd7b26;border-radius:5px;background:#fff2d8;box-shadow:0 1px 3px #8b60231a;row-gap:1px;grid-template-columns:104px minmax(0,1fr) 27px}.trial-selection>label{color:#553811;font-weight:750}.trial-candidates span{background:#f8e5bd;color:#65471e;font-weight:600}.trial-candidates span.selected{background:#295442;color:#fff}.trial-confirm select{border-color:#bd9458;color:#382b17;font-weight:750;background:#fffdfa}.trial-confirm select:disabled{opacity:1;color:#24513e;background:#eef6eb}.trial-confirm button{border-color:#bc8a40;background:#ffe4a7}.trial-confirm button[aria-pressed=true]{background:#c9e4c8;border-color:#57895b}.trial-selection>.dimension-row>label{color:#42391e;font-weight:700}.trial-selection input.nominal-input{background:#254e3d;color:#fff;border:1px solid #254e3d;font-size:15px;font-weight:750;text-align:center;opacity:1}.trial-selection .tolerance-input{background:#fffaf0}.trial-selection[data-status=stale]{border-color:#b44b2b;background:#fff0e7}.view-tools #view-grid[aria-pressed=true]{background:#e9f1e5;color:#3e6744;font-weight:650}
+
+/* Selected thickness Z: tolerance shown as text (±0.02 mm); inputs only while tolerances are unlocked. */
+.trial-selection>.dimension-row .tolerance-input{display:none}
+.trial-selection .tolerance-text{grid-column:3/span 2;font-size:12px;font-weight:700;color:#42391e;white-space:nowrap;padding-left:2px}
+.tolerances-unlocked .trial-selection>.dimension-row .tolerance-input{display:block}
+.tolerances-unlocked .trial-selection .tolerance-text{display:none}
+
+/* ───── Header: save status (SharePoint | 本機, side by side) + settings ───── */
+.topbar .topbar-tools{gap:8px}
+.save-status{display:flex;align-items:stretch;border:1px solid #d5e0d3;border-radius:6px;background:#f7faf5;overflow:hidden}
+.topbar .save-chip{display:flex;align-items:center;gap:4px;padding:2px 9px;border:0;border-radius:0;background:none;color:#405c49;font-size:11px;line-height:18px;white-space:nowrap;cursor:pointer}
+.topbar .save-chip+.save-chip{border-left:1px solid #d5e0d3}
+.topbar .save-chip:hover{background:#ecf3e8}
+.save-chip .chip-icon{width:15px;height:15px;fill:none;stroke:#5b7a63;stroke-width:1.7;stroke-linejoin:round;stroke-linecap:round}
+.save-chip .chip-name{font-weight:650;color:#2f4b38}
+.save-chip .chip-mark{font-weight:800;min-width:9px;text-align:center}
+.save-chip .chip-text{color:#5d7563;font-variant-numeric:tabular-nums}
+.save-chip[data-state=ok] .chip-mark{color:#2f8a4c}
+.save-chip[data-state=busy] .chip-mark{color:#3d72a8}
+.save-chip[data-state=warn] .chip-mark,.save-chip[data-state=warn] .chip-text{color:#a8641b}
+.save-chip[data-state=error] .chip-mark,.save-chip[data-state=error] .chip-text{color:#b23a2a}
+.save-chip[data-state=off] .chip-mark,.save-chip[data-state=off] .chip-text{color:#8d9a8c}
+.save-chip[data-state=error]{background:#fff1ec}
+.topbar .icon-button{display:grid;place-content:center;width:28px;height:28px;border:1px solid #d5e0d3;border-radius:6px;background:#f7faf5;padding:0;cursor:pointer}
+.topbar .icon-button:hover{background:#ecf3e8}
+.icon-button svg{width:17px;height:17px;fill:none;stroke:#46664f;stroke-width:1.6;stroke-linejoin:round}
+@media(max-width:700px){.save-chip .chip-name{display:none}.topbar .save-chip{padding:2px 6px}}
+
+/* ───── Project row: 專案名稱 (AI-Thermal combobox) | PA 品牌 | PA 型號 ───── */
+.project-fields{grid-template-columns:minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1.1fr)}
+.project-name-field{display:flex;gap:6px;align-items:center;min-width:0;font-size:10px;color:#657b60;white-space:nowrap}
+.combobox{position:relative;flex:1;min-width:0;display:flex}
+.combobox input{padding-right:22px}
+.combobox>button{position:absolute;right:1px;top:1px;bottom:1px;width:20px;border:0;border-left:1px solid #e4ebe1;border-radius:0 3px 3px 0;background:#f5f8f2;color:#55715a;font-size:10px;padding:0;cursor:pointer}
+.combobox>button:hover{background:#e7efe2}
+.combobox ul{position:absolute;z-index:40;top:calc(100% + 2px);left:0;min-width:100%;width:max-content;max-width:min(420px,80vw);max-height:260px;overflow:auto;margin:0;padding:3px;list-style:none;background:#fff;border:1px solid #cfdccb;border-radius:5px;box-shadow:0 8px 22px #1b3a2a2e}
+.combobox li[role=option]{display:flex;justify-content:space-between;gap:12px;padding:5px 8px;border-radius:3px;font-size:12px;color:#2c4a35;cursor:pointer}
+.combobox li[role=option] small{color:#8a998a;font-size:10px}
+.combobox li[role=option]:hover,.combobox li[aria-selected=true]{background:#eaf3e4}
+.combobox-empty{padding:6px 8px;font-size:11px;color:#7b8b78;white-space:normal}
+.controls .control-heading{border-top:1px solid #e9eee7}
+.control-heading .tolerance-toolbar{border:0;padding:0;margin:0;background:none}
+
+/* ───── 3D background grid toggle ───── */
+.view-tools .grid-toggle{display:inline-flex;align-items:center;gap:4px}
+.grid-toggle svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.2}
+
+/* ───── Settings dialog ───── */
+#settings-dialog{width:min(720px,94vw)}
+.settings-section{border:1px solid #e1e9dc;border-radius:7px;padding:10px 14px;margin:0 0 12px;background:#fbfdf9}
+.settings-section h3{margin:0 0 6px;font-size:13px;color:#35573c}
+.settings-value{display:flex;gap:10px;margin:2px 0;font-size:12px;line-height:1.5}
+.settings-value span{flex:none;width:96px;color:#7a8b76}
+.settings-value b{font-weight:600;color:#2e4a36;word-break:break-all}
+.settings-note{margin:2px 0 6px;font-size:11px;line-height:1.5;color:#7b8b78}
+.settings-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px}
+.settings-actions button,.settings-actions a{border:1px solid #cfdcc9;border-radius:4px;background:#f4f8f1;color:#3e6045;font-size:11px;padding:4px 10px;line-height:1.4;cursor:pointer;text-decoration:none}
+.settings-actions button:hover,.settings-actions a:hover{background:#e6efe1}
+.settings-actions button:disabled{opacity:.45;cursor:not-allowed}
+.conflict-actions{padding:6px 8px;border-radius:5px;background:#fff1ec;color:#9b3a25;font-size:11px}
+.settings-section output{display:block;min-height:1.2em;font-size:11px;color:#3f6a47}
+.settings-section output.save-error{color:#b23a2a}

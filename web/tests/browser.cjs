@@ -37,6 +37,30 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('.metrics').isVisible(),false);assert.doesNotMatch(await page.locator('body').textContent(),/CuH/);assert.equal(await page.locator('#preform-chamfer').inputValue(),'3.40');assert.equal(await page.locator('#preform-trial_delta').inputValue(),'0.15');for(const id of ['preform-chamfer','preform-trial_delta','preform-thickness_override'])assert.equal(await page.locator(`#${id}`).getAttribute('aria-readonly'),'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-ready'), 'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-parts'), 'pcb,pa');
+    // 3D defaults: every part shown and solid; the background grid is on and can be hidden.
+    for(const name of ['copper','preform','pcb','pa','epad'])assert.equal(await page.locator(`#ref-${name}`).isChecked(),true,`${name} shown by default`);
+    for(const name of ['copper','preform','pcb','pa','epad'])assert.equal(await page.locator(`[data-transparency=${name}]`).getAttribute('aria-pressed'),'false',`${name} solid by default`);
+    assert.equal(await page.locator('#view-grid').textContent(),'背景格線');assert.equal(await page.locator('#viewer').getAttribute('data-grid-visible'),'true');
+    // Header: SharePoint and local save status side by side, settings gear; no local-only badge, GitHub link, 範例 or 匯入參數.
+    const chips=await page.locator('.save-status .save-chip').evaluateAll(els=>els.map(e=>e.getBoundingClientRect()));
+    assert.equal(chips.length,2);assert.ok(Math.abs(chips[0].top-chips[1].top)<1&&chips[1].left>chips[0].right-1,'status chips are side by side');
+    assert.match(await page.locator('#status-sharepoint').textContent(),/SharePoint.*未連線/);assert.match(await page.locator('#status-local').textContent(),/本機.*瀏覽器暫存/);
+    for(const selector of ['.local-badge','.topbar a[href*="github.com"]','#reset','#import','.topbar #help-open'])assert.equal(await page.locator(selector).count(),0,`${selector} removed`);
+    // Project row above the design heading; name, brand and model on one line.
+    const rows=await page.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect();return{name:r('project-name'),brand:r('pa-brand'),model:r('pa-model'),heading:document.querySelector('.control-heading').getBoundingClientRect()};});
+    assert.ok(Math.abs(rows.name.top-rows.brand.top)<2&&Math.abs(rows.brand.top-rows.model.top)<2&&rows.name.right<rows.brand.left&&rows.brand.right<rows.model.left,`one row: ${JSON.stringify(rows)}`);
+    assert.ok(rows.heading.top>rows.name.bottom,'設計尺寸 heading sits below the project row');
+    await page.locator('#project-options-toggle').click();assert.equal(await page.locator('#project-options').isVisible(),true);assert.match(await page.locator('#project-options').textContent(),/SharePoint/);
+    await page.mouse.click(5,300);assert.equal(await page.locator('#project-options').isVisible(),false,'clicking elsewhere closes the list');
+    // Selected thickness Z shows its tolerance as text; the inputs appear only when tolerances are unlocked.
+    assert.equal(await page.locator('#thickness-tolerance-text').textContent(),'±0.02 mm');
+    assert.equal(await page.locator('#tol-preform-thickness_override-minus').isVisible(),false);
+    // Settings: database file, backup folder, SharePoint and help.
+    await page.locator('#settings-open').click();assert.equal(await page.locator('#settings-dialog').isVisible(),true);
+    for(const id of ['db-open','db-create','backup-pick','backup-download','sp-enable','ai-refresh','help-open'])assert.equal(await page.locator(`#${id}`).isVisible(),true,id);
+    assert.match(await page.locator('#settings-sp-location').textContent(),/Thermal-Spec-DB \/ 文件 \/ PA_Copper_CAD/);
+    assert.match(await page.locator('#settings-ai-source').textContent(),/^SharePoint：Thermal-Spec-DB \/ 文件 \/ ToolDatabase \/ thermal_db\.json$/);
+    await page.locator('#help-open').click();assert.equal(await page.locator('#help-dialog').isVisible(),true);assert.equal(await page.locator('#settings-dialog').isVisible(),false);await page.locator('#help-close').click();
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-opening'), 'true');
     assert.deepEqual(await page.locator('#trial-choice option').allTextContents(),['下：0.24 mm','中：0.39 mm','上：0.54 mm']);
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.39');
@@ -68,6 +92,9 @@ async function withDeadline(operation,ms,label){
       await page.waitForFunction(()=>!document.getElementById('download-zip').disabled||!document.getElementById('error').hidden,null,{timeout:120000});
       assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
     };
+    // 範例 was removed: a fresh page with no active project shows the default design
+    // (saved projects stay in the database).
+    const resetToDefaults=async()=>{await page.evaluate(()=>localStorage.removeItem('pa-copper-cad.active-project'));await page.reload({waitUntil:'networkidle'});await modelReady();};
     assert.equal(await page.locator('.tolerance-input').count(),64);
     assert.equal(await page.locator('.tolerance-input').evaluateAll(inputs=>inputs.every(i=>i.readOnly)),true);
     assert.equal(await page.locator('#tol-copper-base_thickness-minus').inputValue(),'0.1');
@@ -148,7 +175,7 @@ async function withDeadline(operation,ms,label){
     assert.equal(await hRow.locator('td').last().textContent(),'0.73 mm');
     await page.locator('#calculation-guide-close').click();
 
-    await page.locator('#reset').click();await modelReady();
+    await resetToDefaults();
     const annotationOutput=path.join(output,'dimensions');fs.mkdirSync(annotationOutput,{recursive:true});
     const inputNames=await page.locator('#fields .nominal-input').evaluateAll(inputs=>inputs.map(input=>input.name));
     assert.equal(inputNames.length,32);
@@ -274,8 +301,8 @@ async function withDeadline(operation,ms,label){
       const button=page.locator(`[data-transparency=${component}]`),before=await button.getAttribute('aria-pressed');await button.click();assert.equal(await page.locator(`#ref-${component}`).isChecked(),true);const opacity=JSON.parse(await page.locator('#viewer').getAttribute('data-component-opacities'))[component];assert.deepEqual(opacity,[before==='true'?1:.18]);await button.click();
     }
     await page.locator('#view-iso-bottom').click();assert.equal(await page.locator('#viewer').getAttribute('data-camera-view'),'iso-bottom');assert.equal(await page.locator('#view-orthographic').getAttribute('aria-pressed'),'false');await page.locator('.viewer-panel').screenshot({path:path.join(output,'flipped-isometric.png')});await page.locator('#view-iso').click();
-    const projectMetadata={name:'基地台 PA 專案 / 測試',pa_model:'H-37248KC-6/2'};
-    await page.locator('#project-name').fill(projectMetadata.name);
+    const projectMetadata={name:'基地台 PA 專案 / 測試',pa_brand:'Ampleon',pa_model:'H-37248KC-6/2'};
+    await page.locator('#project-name').fill(projectMetadata.name);await page.locator('#pa-brand').fill(projectMetadata.pa_brand);
     await page.locator('#pa-model').fill(projectMetadata.pa_model);
     assert.equal(await page.locator('#download-zip').isDisabled(),false,'Metadata edits must preserve the verified CAD model');
     const downloaded = page.waitForEvent('download'); await page.locator('#download-zip').click();
@@ -305,7 +332,7 @@ async function withDeadline(operation,ms,label){
       const custom=unzipSync(fs.readFileSync(customPath));
       assert.equal((strFromU8(custom['copper.dxf']).match(/\nCIRCLE\n/g)||[]).length,4);
       assert.equal(JSON.parse(strFromU8(custom['creo_job.json'])).native_parameters.copper.HOLE_MASK,15);
-      await page.locator('#reset').click();await modelReady();
+      await resetToDefaults();
     }
     // Moving the boss translates its real solid, PA reference and PCB opening.
     await page.locator('#boss-center_from_left').fill('23');await page.locator('#boss-center_from_bottom').fill('17');
@@ -318,7 +345,7 @@ async function withDeadline(operation,ms,label){
     assert.deepEqual(shifted.results.boss_center,[3,2]);assert.ok(Math.abs(shifted.results.copper_volume-report.results.copper_volume)<1e-6);
     const shiftedJob=JSON.parse(strFromU8(shiftedFiles['creo_job.json']));assert.equal(shiftedJob.native_parameters.copper.BOSS_X,3);assert.equal(shiftedJob.native_parameters.copper.BOSS_Y,2);
     // A hole crossing a rounded corner must survive genuine CAD/STEP validation.
-    await page.locator('#reset').click();await modelReady();await page.locator('#copper-hole_edge_offset').fill('1');
+    await resetToDefaults();await page.locator('#copper-hole_edge_offset').fill('1');
     await page.locator('#generate').click();await modelReady();await page.locator('#tab-copper').click();await page.locator('#view-top').click();
     assert.equal((await page.locator('#viewer').getAttribute('data-copper-shades')).split(',').length,3);
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'corner-breakouts.png')});
@@ -326,7 +353,7 @@ async function withDeadline(operation,ms,label){
     const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['report.json']));
     assert.equal(broken.results.hole_breakouts,2);assert.equal((strFromU8(brokenFiles['copper.dxf']).match(/\nCIRCLE\n/g)||[]).length,0);
     assert.equal(broken.verification,'volume_and_step_roundtrip_passed');
-    await page.locator('#reset').click();await modelReady();
+    await resetToDefaults();
     // Auto linkage must update the readonly fields, preview, thickness and actual exports.
     assert.equal(await page.locator('#pcb-opening_length').getAttribute('aria-readonly'),'true');
     await page.locator('#package-length').fill('21.07');
@@ -379,9 +406,7 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#pcb-opening_length').inputValue(),'22','Rule changes cannot overwrite manual dimensions');
     await page.locator('#pcb-auto').check();
     await page.waitForFunction(()=>document.getElementById('pcb-opening_length').value==='21.4'&&document.getElementById('pcb-opening_width').value==='10.6');
-    await page.locator('#reset').click();
-    await page.waitForFunction(()=>!document.getElementById('download-zip').disabled||!document.getElementById('error').hidden,null,{timeout:120000});
-    assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
+    await resetToDefaults();
     await page.locator('#tab-preform').click();
     const stepDownload = page.waitForEvent('download'); await page.locator('#download-step').click();
     assert.match((await stepDownload).suggestedFilename(), /preform\.step$/);
@@ -415,9 +440,7 @@ async function withDeadline(operation,ms,label){
     await focusNominal('copper.pad_size');await page.locator('#copper-pad_size').fill('4'); await page.locator('#generate').click();
     await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /削角/);
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
-    await page.locator('#reset').click();
-    await page.waitForFunction(() => !document.getElementById('download-zip').disabled || !document.getElementById('error').hidden, null, { timeout: 120000 });
-    assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
+    await resetToDefaults();
     await page.setViewportSize({ width: 390, height: 844 });
     await page.locator('#viewer').scrollIntoViewIfNeeded();
     for(const key of annotationNames){await focusNominal(key);await checkAnnotation(key);}
