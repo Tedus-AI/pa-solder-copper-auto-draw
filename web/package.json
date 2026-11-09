@@ -10,8 +10,8 @@
     "test:browser": "node tests/browser.cjs",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint .",
-    "format": "prettier --write src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js eslint.config.js",
-    "format:check": "prettier --check src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js eslint.config.js"
+    "format": "prettier --write src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js",
+    "format:check": "prettier --check src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js"
   },
   "dependencies": {
     "fflate": "0.8.2",

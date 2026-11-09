@@ -10,7 +10,7 @@
 
 網頁原始碼在 `web/`，部署與測試方式見 [DEPLOYMENT.md](DEPLOYMENT.md)。以下保留原始 Python CLI 使用說明。
 
-桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、銅塊／錫片／PCB／PA／E-PAD顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
+桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、銅塊／錫片／PCB／PA／E-PAD顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。銅塊 2D 圖面依公司圖面 348001J40001 的格式出圖（可選含封面），尺寸公差跟隨工具設定。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
 
 專案名稱、PA 品牌與 PA 型號同排顯示；專案名稱可從 AI-Thermal 工具的專案清單下拉選擇（只讀）。專案可儲存、另存、載入與刪除，資料庫比照 Thermal-Test-Report-Builder：頁首的 ⚙ 設定可選擇本機資料庫檔（可放共用磁碟）與每日自動備份資料夾，並可開啟 SharePoint 雙存檔（Thermal-Spec-DB／文件／PA_Copper_CAD）；頁首左右並排顯示 SharePoint 與本機的寫入狀態。尺寸欄的 Typ. 表示未加公差的設計尺寸。
 

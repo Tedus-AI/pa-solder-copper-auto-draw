@@ -3,10 +3,10 @@ name: PA CAD validation
 on:
   push:
     branches: [main, deploy/pa-copper-preform-cad]
-    # web/src is included: browser/Python parity and web DXF tests live here.
-    paths: ['cad-app/**', 'web/src/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
+    # web/src and the drawing template are included: browser/Python parity and web DXF tests live here.
+    paths: ['cad-app/**', 'web/src/**', 'web/public/drawing/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
   pull_request:
-    paths: ['cad-app/**', 'web/src/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
+    paths: ['cad-app/**', 'web/src/**', 'web/public/drawing/**', 'web/package.json', 'web/package-lock.json', '.github/workflows/pa-cad.yml']
   workflow_dispatch:
 
 permissions:

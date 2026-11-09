@@ -308,7 +308,11 @@ async function withDeadline(operation,ms,label){
     const downloaded = page.waitForEvent('download'); await page.locator('#download-zip').click();
     const download = await downloaded; const file = path.join(output, 'pa_780_m1p.zip'); await download.saveAs(file);
     const files = unzipSync(fs.readFileSync(file));
-    for (const name of ['copper.step', 'preform.step', 'copper.dxf', 'preform.dxf', 'layout_solder_mask.dxf', 'report.json', 'creo_job.json', 'creo_runner.py', 'WINDOWS_CREO7.md']) assert.ok(files[name], `Missing ${name}`);
+    for (const name of ['copper.step', 'preform.step', 'copper.dxf', 'preform.dxf', 'copper_drawing.dxf', 'layout_solder_mask.dxf', 'report.json', 'creo_job.json', 'creo_runner.py', 'WINDOWS_CREO7.md']) assert.ok(files[name], `Missing ${name}`);
+    // 2D drawing in the company format: Big5 text, cover sheet included by default
+    const sheetDrawing=new TextDecoder('big5').decode(files['copper_drawing.dxf']);
+    assert.match(sheetDrawing,/\$ACADVER\n {2}1\nAC1015\n/);assert.ok(sheetDrawing.includes('1.發行圖面')&&sheetDrawing.includes('348XXXXXXX'));
+    assert.equal(sheetDrawing.split(`\n${projectMetadata.name}\n`).length-1,2,'USED ON on the cover and the drawing sheet');
     assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).sort(),['copper.step','preform.step']);
     assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.stl')).sort(),['copper.stl','preform.stl']);
     assert.ok(strFromU8(files['layout_solder_mask.dxf']).includes('EPAD_OPENING'));
@@ -316,6 +320,7 @@ async function withDeadline(operation,ms,label){
     const report = JSON.parse(strFromU8(files['report.json']));
     assert.equal(report.verification, 'volume_and_step_roundtrip_passed'); assert.equal(report.native_prt.status, 'not_generated');
     assert.equal(report.reference_geometry.pcb,'display_only');assert.equal(report.reference_geometry.pa,'display_only');
+    assert.deepEqual([report.drawing.file,report.drawing.cover_sheet,report.drawing.sheets,report.drawing.view_scale],['copper_drawing.dxf',true,2,'3:2']);
     assert.ok(report.layout.epad_cells>200);
     assert.ok(Math.abs(report.cad_volumes_mm3.preform - 68.97470674352311) < .001);
     const hashes = JSON.parse(strFromU8(files['sha256.json']));
@@ -424,6 +429,15 @@ async function withDeadline(operation,ms,label){
     const layoutDownload=page.waitForEvent('download');await page.locator('#download-layout').click();
     const layoutFile=await layoutDownload;assert.match(layoutFile.suggestedFilename(),/layout_solder_mask\.dxf$/);
     await layoutFile.saveAs(path.join(output,'layout_solder_mask.dxf'));
+    // 2D drawing from the preview; without the cover it is SHEET 1 OF 1
+    await page.locator('#drawing-cover').uncheck();
+    const drawingDownload=page.waitForEvent('download');await page.locator('#download-drawing').click();
+    const drawingFile=await drawingDownload;assert.match(drawingFile.suggestedFilename(),/_copper_drawing\.dxf$/);
+    const drawingPath=path.join(output,'copper_drawing.dxf');await drawingFile.saveAs(drawingPath);
+    const drawingText=new TextDecoder('big5').decode(fs.readFileSync(drawingPath));
+    assert.ok(!drawingText.includes('發行圖面')&&drawingText.includes('截面'),'drawing sheet only');
+    assert.equal(await page.locator('#error').isVisible(),false);
+    await page.locator('#drawing-cover').check();
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});
     assert.equal(await page.locator('#metric-model').textContent(), '0.535851');
     // A lock on a new or edited project is not written silently; save first.
