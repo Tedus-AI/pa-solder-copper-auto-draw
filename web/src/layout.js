@@ -1,7 +1,5 @@
 import clipping from 'polygon-clipping';
-import { formatDimension, formatNumber } from './dimension-format.js';
 import { copperFootprint } from './copper-geometry.js';
-import { toleranceSuffix } from './tolerances.js';
 import { dxfDocument, CENTER_LTYPE, CONTINUOUS } from './dxf-document.js';
 
 // Curved clipping boundaries use a maximum 0.001 mm chord deviation. The same
@@ -141,6 +139,10 @@ export function layoutGeometry(r) {
   };
 }
 
+const PA_CENTER_RADIUS = 0.5;
+const DIM_TEXT_HEIGHT = 1;
+
+/** Layout (solder mask / E-PAD) drawing: geometry, the PA centre and its distances to the copper edges. */
 export function layoutDxf(r, g = layoutGeometry(r)) {
   const layers = {
     SOLDER_MASK: 3,
@@ -150,7 +152,7 @@ export function layoutDxf(r, g = layoutGeometry(r)) {
     MASK_BOUNDARY: 3,
     HOLE_CLEARANCE: 2,
     MOUNT_HOLE: 1,
-    NOTES: 7,
+    PA_CENTER: 7,
     DIM: 1,
     CENTER: 8,
   };
@@ -163,12 +165,6 @@ export function layoutDxf(r, g = layoutGeometry(r)) {
     })),
   });
   const put = doc.put;
-  const dimension = (name, value, key, extra = {}) =>
-    formatDimension(name, value, {
-      cad: true,
-      tolerance: key ? toleranceSuffix(r.design, key).replaceAll('−', '-') : '',
-      ...extra,
-    });
   const poly = (ring, layer) => {
     const points = ring.slice(0, -1);
     put(0, 'LWPOLYLINE', 100, 'AcDbEntity', 8, layer, 100, 'AcDbPolyline', 90, points.length, 70, 1);
@@ -310,97 +306,65 @@ export function layoutDxf(r, g = layoutGeometry(r)) {
   for (const sx of [-1, 1])
     for (const sy of [-1, 1])
       centerMark(cx + (sx * r.design.pcb.opening_length) / 2, cy + sy * (r.design.pcb.opening_width / 2 - o), o);
-  const vLabel = dimension('V', l.hole_clearance, 'layout.hole_clearance', {
-    quantity: g.centers.length,
-    featureSymbol: '⌀',
-    prefix: '',
-    minDigits: 2,
-  });
-  const hole = g.centers.at(-1),
-    vr = l.hole_clearance / 2,
-    dir = [Math.sign(hole[0]) / Math.SQRT2, Math.sign(hole[1]) / Math.SQRT2],
-    a = [hole[0] - dir[0] * vr, hole[1] - dir[1] * vr],
-    b = [hole[0] + dir[0] * vr, hole[1] + dir[1] * vr],
-    outside = l.hole_clearance < 2;
-  line(a, b);
-  arrow(a, outside ? dir.map(v => -v) : dir);
-  arrow(b, outside ? dir : dir.map(v => -v));
-  if (outside) line([a[0] - dir[0], a[1] - dir[1]], [b[0] + dir[0], b[1] + dir[1]]);
-  const sx = Math.sign(hole[0]),
-    sy = Math.sign(hole[1]),
-    knee = [
-      sx * (r.design.copper.base_length / 2 + l.border_width + 3),
-      sy * (r.design.copper.base_width / 2 + l.border_width + 3),
-    ],
-    shelf = Math.max(8, vLabel.replaceAll('%%c', '⌀').replaceAll('%%p', '±').length * 0.45);
-  line(b, knee);
-  line(knee, [knee[0] + sx * shelf, knee[1]]);
-  put(
-    0,
-    'TEXT',
-    100,
-    'AcDbEntity',
-    8,
-    'DIM',
-    100,
-    'AcDbText',
-    10,
-    knee[0] + (sx > 0 ? 0.2 : -shelf),
-    20,
-    knee[1] + 0.7,
-    30,
-    0,
-    40,
-    0.8,
-    1,
-    vLabel,
-    100,
-    'AcDbText',
-  );
-  const notes = [
-    `LAYOUT / ${r.design.name} / mm / 1:1 / PPT p9`,
-    `SOLDER_MASK = green covered area; EPAD_OPENING = exposed pad / mask opening`,
-    [
-      ['R', l.border_width, 'layout.border_width'],
-      ['S', l.epad_size, 'layout.epad_size'],
-      ['T', l.web_width, 'layout.web_width'],
-      ['Pitch', g.pitch],
-    ]
-      .map(([name, value, key]) => dimension(name, value, key))
-      .join('; '),
-    `U = PCB window: ${dimension('M', r.design.pcb.opening_length, 'pcb.opening_length')}; ${dimension('N', r.design.pcb.opening_width, 'pcb.opening_width')}`,
-    `${dimension('O', r.design.pcb.relief_diameter, 'pcb.relief_diameter', { quantity: 4, featureSymbol: '⌀', prefix: '', minDigits: 2 })}; ${vLabel}`,
-    `Origin = copper base center; PCB/E-PAD center X = ${formatNumber((g.origin || [0, 0])[0])} mm; Y = ${formatNumber((g.origin || [0, 0])[1])} mm; cells = ${g.cells.length}`,
-    'V excludes E-PADs; green annulus remains between actual hole D and V.',
-    'Reference layers COPPER_BOUNDARY / PCB_CUTOUT / HOLE_CLEARANCE are not mask polygons.',
-    'Solder volume uses this P7 relief outline (half-disc union), not the p12 one-circle term.',
-    'Outer R band is outside copper outline. Curved clipping chord deviation <=0.001mm.',
-    'Edge landing in a web: confirm edge treatment with Layout before manufacture.',
-  ];
-  notes.push('Unspecified tolerances are not manufacturing zero limits; see report.json.');
-  notes.forEach((text, i) =>
+  // PA centre (= PCB window / main-boss centre) and its distances to the copper's
+  // left and bottom edges — the only annotations on the Layout drawing.
+  put(0, 'CIRCLE', 100, 'AcDbEntity', 8, 'PA_CENTER', 100, 'AcDbCircle', 10, cx, 20, cy, 30, 0, 40, PA_CENTER_RADIUS);
+  const c = r.design.copper,
+    left = -c.base_length / 2,
+    bottom = -c.base_width / 2,
+    R = c.corner_radius,
+    gap = 0.6,
+    overshoot = 1;
+  const text = (value, x, y, rotation) =>
     put(
       0,
       'TEXT',
       100,
       'AcDbEntity',
       8,
-      'NOTES',
+      'DIM',
       100,
       'AcDbText',
       10,
-      r.design.copper.base_length / 2 + l.border_width + 4,
+      x,
       20,
-      18 - i * 1.7,
+      y,
       30,
       0,
       40,
-      0.8,
+      DIM_TEXT_HEIGHT,
       1,
-      text,
+      `${value.toFixed(2)} mm`,
+      50,
+      rotation,
+      72,
+      1,
+      11,
+      x,
+      21,
+      y,
+      31,
+      0,
       100,
       'AcDbText',
-    ),
-  );
+      73,
+      0,
+    );
+  // Horizontal: PA centre → copper left edge, dimension line below the part.
+  const yDim = bottom - l.border_width - 3;
+  line([cx, cy - PA_CENTER_RADIUS - gap], [cx, yDim - overshoot]);
+  line([left, bottom + R - gap], [left, yDim - overshoot]);
+  line([left, yDim], [cx, yDim]);
+  arrow([left, yDim], [1, 0]);
+  arrow([cx, yDim], [-1, 0]);
+  text(cx - left, (left + cx) / 2, yDim + 0.6, 0);
+  // Vertical: PA centre → copper bottom edge, dimension line left of the part.
+  const xDim = left - l.border_width - 3;
+  line([cx - PA_CENTER_RADIUS - gap, cy], [xDim - overshoot, cy]);
+  line([left + R - gap, bottom], [xDim - overshoot, bottom]);
+  line([xDim, bottom], [xDim, cy]);
+  arrow([xDim, bottom], [0, 1]);
+  arrow([xDim, cy], [0, -1]);
+  text(cy - bottom, xDim - 0.6, (bottom + cy) / 2, 90);
   return doc.toString();
 }

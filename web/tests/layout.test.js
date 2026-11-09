@@ -49,7 +49,19 @@ test('Layout DXF encodes mm, distinct polarity layers and hatch holes',()=>{
   const text=layoutDxf(r,g);
   for(const layer of ['SOLDER_MASK','EPAD_OPENING','PCB_CUTOUT','COPPER_BOUNDARY','MASK_BOUNDARY','HOLE_CLEARANCE','MOUNT_HOLE'])assert.ok(text.includes(`\n2\n${layer}\n`));
   assert.ok(text.includes('$INSUNITS\n70\n4'));assert.ok(text.includes('\nHATCH\n'));
-  assert.ok(text.includes('green covered area'));assert.ok(text.endsWith('0\nEOF\n'));
+  assert.ok(text.endsWith('0\nEOF\n'));
+});
+test('Layout DXF carries no notes: only the PA centre circle and its distances to the copper left and bottom edges',()=>{
+  const d=structuredClone(defaults);d.boss.center_from_left=23.4;d.boss.center_from_bottom=12.6;
+  const shifted=calculate(d),text=layoutDxf(shifted,layoutGeometry(shifted)),lines=text.split('\n');
+  const pairs=[];for(let i=0;i+1<lines.length;i+=2)pairs.push([lines[i],lines[i+1]]);
+  const texts=pairs.flatMap(([c,v],i)=>c==='0'&&v==='TEXT'?[pairs.slice(i+1).find(([k])=>k==='1')[1]]:[]);
+  assert.deepEqual(texts,['23.40 mm','12.60 mm']);
+  for(const gone of ['LAYOUT /','SOLDER_MASK =','%%cV','Origin =','NOTES'])assert.ok(!text.includes(gone),gone);
+  const circle=pairs.findIndex(([c,v],i)=>c==='0'&&v==='CIRCLE'&&pairs.slice(i+1,i+6).some(([k,l])=>k==='8'&&l==='PA_CENTER'));
+  assert.ok(circle>0,'PA centre circle on its own layer');
+  const at=k=>Number(pairs.slice(circle+1).find(([c])=>c===k)[1]);
+  assert.ok(Math.abs(at('10')-(23.4-20))<1e-9&&Math.abs(at('20')-(12.6-15))<1e-9&&at('40')===.5,'small circle at the PA centre');
 });
 test('invalid keepout and excessively dense array rejected',()=>{
   const d=structuredClone(defaults);d.layout.hole_clearance=2;assert.ok(calculate(d).warnings.some(w=>w.includes('避讓')));
