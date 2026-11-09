@@ -100,6 +100,16 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#guide-volume-3d').getAttribute('data-selected-opacity'),'1');
     assert.equal(await page.locator('#guide-section svg').getAttribute('data-scale-x'),await page.locator('#guide-section svg').getAttribute('data-scale-z'));
     for(const mode of ['cavity','copper','solder','all']){await page.locator(`[data-guide-layer=${mode}]`).click();assert.equal(await page.locator('#guide-volume-3d').getAttribute('data-volume'),mode);await page.locator('.guide-geometry').screenshot({path:path.join(output,`volume-${mode}.png`)});}
+    // In 'all' mode nothing breathes, so frames are deterministic.
+    // The isometric volume view has its own reset to the default isometric camera.
+    const volumeView=page.locator('#guide-volume-3d');
+    const isoDefault=await volumeView.locator('canvas').screenshot();
+    const volumeBox=await volumeView.boundingBox();
+    await page.mouse.move(volumeBox.x+volumeBox.width/2,volumeBox.y+volumeBox.height/2);await page.mouse.down();await page.mouse.move(volumeBox.x+volumeBox.width/2+120,volumeBox.y+volumeBox.height/2+40,{steps:6});await page.mouse.up();
+    await page.waitForTimeout(400);assert.notDeepEqual(await volumeView.locator('canvas').screenshot(),isoDefault,'Dragging must rotate the volume view');
+    await page.locator('#guide-volume-reset').click();await page.waitForTimeout(600);
+    assert.equal(await volumeView.getAttribute('data-camera-view'),'iso');
+    assert.deepEqual(await volumeView.locator('canvas').screenshot(),isoDefault,'等角 button restores the default isometric view');
     assert.equal(await page.locator('details[data-group=preform] #calculation-guide-open').count(),1);
     assert.equal(await page.locator('.guide-table tbody tr').count(),12);
     assert.equal(await page.locator('[data-guide-dimension="preform.trial_delta"]').count(),0);

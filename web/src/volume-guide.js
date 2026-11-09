@@ -7,7 +7,7 @@ import {dimensionFor,dimensionLabel,referenceLevels} from './dimensions.js';
 import {cameraView} from './camera-views.js';
 import {paReference} from './pa-reference.js';
 import {ARROW_LENGTH,ARROW_HALF_WIDTH,OUTSIDE_TAIL} from './dimension-arrows.js';
-const MIN_DIMENSION_PX=70;
+const MIN_DIMENSION_PX=70,OPAQUE_DEPTH_WRITE=.8;
 // Screen-space dimension graphics: arrow tips sit exactly on the measured
 // points. When the projected distance is too short for two inside arrows,
 // the arrows move outside both ends and point inward (drafting convention).
@@ -75,12 +75,20 @@ export class VolumeGuide3D{
   const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
   const render=t=>{this.frame=requestAnimationFrame(render);this.controls.update();const pulse=this.inspector?0:reduce?.4:.08+1.1*(.5+.5*Math.sin(t/220));for(const {mesh}of this.objects)mesh.material.emissiveIntensity=mesh.userData.selected?pulse:0;this.renderer.render(this.scene,this.camera);this.renderDimension();};this.frame=requestAnimationFrame(render);
  }
- resetView(view='iso'){const{offset,up}=cameraView(view,this.extent*2);this.camera.up.set(...up);this.camera.position.copy(this.center).add(new THREE.Vector3(...offset));this.camera.zoom=1;this.camera.lookAt(this.center);this.controls.target.copy(this.center);this.camera.updateProjectionMatrix();this.controls.update();}
+ resetView(view='iso'){
+  // Flush any orbit-damping momentum so the reset view does not drift.
+  this.controls.enableDamping=false;this.controls.update();this.controls.enableDamping=true;
+  this.el.dataset.cameraView=view;const{offset,up}=cameraView(view,this.extent*2);this.camera.up.set(...up);this.camera.position.copy(this.center).add(new THREE.Vector3(...offset));this.camera.zoom=1;this.camera.lookAt(this.center);this.controls.target.copy(this.center);this.camera.updateProjectionMatrix();this.controls.update();}
  select(mode){this.mode=mode;this.el.dataset.volume=mode;
   for(const {mesh,edge,rec}of this.objects){const dimension=mode==='dimension',chosen=dimension?component(rec)===this.dimension.component:rec.role===mode,all=mode==='all';
    mesh.visible=edge.visible=dimension?chosen:rec.role==='reference'||rec.role==='copper'||chosen||all&&!['cavity','preform'].includes(rec.role);
    const opacity=chosen?1:all?(rec.role==='solder'?.65:rec.part==='pcb'?.25:.85):.1;
-   mesh.userData.selected=chosen;Object.assign(mesh.material,{transparent:opacity<1,opacity,depthWrite:opacity===1});mesh.material.emissive.setHex(chosen?rec.color:0);edge.material.opacity=chosen?.9:.16;mesh.material.needsUpdate=true;
+   mesh.userData.selected=chosen;
+   // Transparent meshes are sorted by bounding-sphere centre, so a large part
+   // (copper base) can be drawn after a small part above it (PA pins) at some
+   // angles. Nearly opaque parts therefore write depth; only the see-through
+   // PCB and solder layers skip it.
+   Object.assign(mesh.material,{transparent:opacity<1,opacity,depthWrite:opacity>=OPAQUE_DEPTH_WRITE});mesh.material.emissive.setHex(chosen?rec.color:0);edge.material.opacity=chosen?.9:.16;mesh.material.needsUpdate=true;
   }this.el.dataset.selectedOpacity=mode==='all'?'mixed':'1';
   this.el.dataset.visibleComponents=[...new Set(this.objects.filter(({mesh})=>mesh.visible).map(({rec})=>component(rec)))].sort().join(',');
  }
