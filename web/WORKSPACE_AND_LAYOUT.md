@@ -17,7 +17,7 @@
 
 專案名稱與PA型號並排，支援中文及單行文字；專案名稱必填，PA型號可留空。Typ.表示未加上下公差的設計尺寸，不是實測平均值。銅塊基座、中凸台、四角小凸台整合於同一銅塊設定區；L標示為「中凸台總高L」。
 
-專案目前存於這個瀏覽器的localStorage，保存完整尺寸、公差、專案名稱與PA型號，支援重新載入、更新、另存與刪除；尚未連接後端，清除瀏覽器資料會移除本機儲存。儲存介面集中於project-store.js，供未來替換成後端服務。CAD檔名代碼design.name與人可讀的project.name／project.pa_model分開，保持原生Creo檔名規則與舊參數檔相容。
+專案保存完整尺寸、公差、專案名稱、PA品牌與PA型號，支援重新載入、更新、另存與刪除。工作副本在project-db.js：一律寫入瀏覽器快取；在「設定」選擇本機資料庫檔（local-file-db.js，File System Access API，可放共用磁碟）後同時寫入該檔，檔案被他人修改時停止寫入不覆蓋；備份資料夾每日一份、保留30份。開啟SharePoint雙存檔（sp-sync.js，沿用Thermal-Test-Report-Builder的設計）後，專案逐一存成Thermal-Spec-DB／文件／PA_Copper_CAD/Database/projects/<id>.json，以eTag避免覆蓋同事的修改（衝突時另存「衝突副本」），每日備份至PA_Copper_CAD/Backup保留2份。專案名稱可從AI-Thermal工具的ToolDatabase/thermal_db.json專案清單下拉選擇，本工具只讀不寫。CAD檔名代碼design.name與人可讀的project.name／project.pa_model分開，保持原生Creo檔名規則與舊參數檔相容。
 
 ## 公差來源與鎖定
 

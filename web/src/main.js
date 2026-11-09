@@ -1,21 +1,25 @@
 import './style.css';
 import { zipSync, strToU8 } from 'fflate';
-import { parse, stringify } from 'yaml';
+import { stringify } from 'yaml';
 import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject } from './design.js';
-import { toleranceDefaults, getTolerance, toleranceText, toleranceSource } from './tolerances.js';
+import { toleranceDefaults, getTolerance, toleranceText, toleranceSource, toleranceSuffix } from './tolerances.js';
 import { faceViews } from './camera-views.js';
 import { formatDimension } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { CADViewer } from './viewer.js';
-import { BrowserProjectStore } from './project-store.js';
+import { ProjectDatabase } from './project-db.js';
+import { LocalFileDb } from './local-file-db.js';
+import { SharePointSync } from './sp-sync.js';
+import { MsalAuth } from './msal-auth.js';
+import { setupStorageUI } from './storage-ui.js';
 import {chamferFor,TRIAL_DELTA,emptyTrial,trialChoices} from './preform-rules.js';
 import { createCalculationGuide } from './calculation-guide.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial();
-const projectStore=new BrowserProjectStore();let activeProjectId=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
+const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 const downloadButtons=['download-zip','download-dxf','download-step'];
 const formulaButtons=new Map();let activeFormulaButton=null;
 const calculationIds=new Set(['metric-z','metric-model','metric-volume','v-cavity','v-boss','v-area','trials']);
@@ -61,7 +65,7 @@ $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 // Compact visible labels retain the full quantity name in their formula help.
 for(const[id,label]of [['metric-z','計算 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
 const toleranceLegend=$('tolerance-status').parentElement.querySelector('small');toleranceLegend.title=toleranceLegend.textContent;toleranceLegend.textContent='−／＋偏差；* 原資料未指定，空白暫按 0';
-const toleranceToolbar=document.querySelector('.tolerance-toolbar');toleranceToolbar.title=toleranceLegend.title;document.querySelector('.control-heading').insertBefore(toleranceToolbar,document.querySelector('.config-tools'));
+document.querySelector('.tolerance-toolbar').title=toleranceLegend.title;
 
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
@@ -125,7 +129,7 @@ for(const group of uiGroups){
   }
   details.append(grid);
   if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表 ↗';details.append(button);
-    const trials=document.createElement('div');trials.className='trial-selection';trials.innerHTML='<div id="trial-candidates" class="trial-candidates"></div><label for="trial-choice">錫片厚度驗證後選定</label><div class="trial-confirm"><select id="trial-choice" aria-label="錫片厚度驗證後選定"></select><button id="trial-lock" type="button" aria-pressed="false" title="鎖定此案的驗證結果">🔓</button></div><p id="trial-result-status" aria-live="polite"></p>';trials.append(grid.querySelector('[data-dimension="preform.thickness_override"]'));details.append(trials);}
+    const trials=document.createElement('div');trials.className='trial-selection';trials.innerHTML='<div id="trial-candidates" class="trial-candidates"></div><label for="trial-choice">錫片厚度驗證後選定</label><div class="trial-confirm"><select id="trial-choice" aria-label="錫片厚度驗證後選定"></select><button id="trial-lock" type="button" aria-pressed="false" title="鎖定此案的驗證結果">🔓</button></div><p id="trial-result-status" aria-live="polite"></p>';const selectedRow=grid.querySelector('[data-dimension="preform.thickness_override"]');const toleranceText=document.createElement('span');toleranceText.id='thickness-tolerance-text';toleranceText.className='tolerance-text';toleranceText.title='錫片厚度 Z 的製造公差；按「解鎖公差」可修改上下偏差';selectedRow.append(toleranceText);trials.append(selectedRow);details.append(trials);}
 
   if(group.id==='copper'){const box=document.createElement('fieldset');box.className='hole-selection';box.innerHTML='<legend>吊掛孔角位（俯視，可複選）</legend>'+[['top_left','左上'],['top_right','右上'],['bottom_left','左下'],['bottom_right','右下']].map(([key,label])=>`<label><input type="checkbox" data-hole-corner="${key}">${label}</label>`).join('');details.append(box);}
   if(group.id==='pcb'){
@@ -166,7 +170,7 @@ function updateToleranceLock(){
   $('design-form').classList.toggle('tolerances-unlocked',tolerancesUnlocked);
 }
 function formValues(){
-  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),pa_model:$('pa-model').value.trim()};d.tolerances={};
+  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()};d.tolerances={};
   for(const path of allPaths){
     const[group,key]=path.split('.'),v=inputFor(path).value;
     if(!v&&key!=='thickness_override')throw new Error(`${titleFor(path)} 不可留空。`);
@@ -186,7 +190,7 @@ function formValues(){
 function fill(d){
   trialRecord=structuredClone(d.trial_result??emptyTrial());
   projectMetadataValid=true;$('name').value=d.name;
-  $('project-name').value=d.project?.name??d.name??'未命名專案';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
+  $('project-name').value=d.project?.name??d.name??'未命名專案';$('pa-brand').value=d.project?.pa_brand??'';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
   document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
@@ -237,13 +241,13 @@ function invalidate(){
 // Only this controller knows about the browser repository. CAD calculations
 // continue to use a complete Design object, ready for a future backend adapter.
 function syncProjectMetadata(){
-  const project=normalizeProject({name:$('project-name').value.trim(),pa_model:$('pa-model').value.trim()});
+  const project=normalizeProject({name:$('project-name').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()});
   for(const value of [result,draft])if(value?.results?.design)value.results.design.project=structuredClone(project);
   projectMetadataValid=true;downloadButtons.forEach(id=>$(id).disabled=!result);$('download-layout').disabled=!draft;
   return project;
 }
 function markDirty(message='有未儲存的變更'){projectDirty=true;projectMessage(message);}
-function projectMessage(message,failed=false){const output=$('project-save-status');output.textContent=message;output.title=message;output.classList.toggle('save-error',failed);}
+function projectMessage(message,failed=false){spSync.setEditing(projectDirty?activeProjectId:null);const output=$('project-save-status');output.textContent=message;output.title=message;output.classList.toggle('save-error',failed);}
 function refreshProjectList(){
   const select=$('project-select'),placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='載入已儲存專案…';
   select.replaceChildren(placeholder);
@@ -257,8 +261,8 @@ function submitProjectModel(){if(busy)rebuildQueued=true;else $('design-form').r
 function saveProject(asNew=false){
   try{
     clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
-    const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;
-    $('project-name').value=design.project.name;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
+    const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;activeRecordStamp=record.updated_at;
+    $('project-name').value=design.project.name;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
     projectDirty=false;projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
   }catch(e){projectMessage(e.message,true);return null;}
 }
@@ -266,17 +270,31 @@ function initializeProjects(){
   fill(structuredClone(defaults));
   try{
     const record=projectStore.active();
-    if(record){const design=calculate(record.design).design;fill(design);activeProjectId=record.id;projectDirty=false;projectMessage('已恢復最近儲存專案');}
+    if(record){const design=calculate(record.design).design;fill(design);activeProjectId=record.id;activeRecordStamp=record.updated_at;projectDirty=false;projectMessage('已恢復最近儲存專案');}
     refreshProjectList();
   }catch(e){projectMessage(e.message,true);$('project-delete').disabled=true;}
 }
+// Projects changed underneath the editor: a database file was opened / re-read, or
+// SharePoint delivered colleagues' changes. The active project is reloaded only when
+// it has no unsaved edits (the sync engine never replaces it while it is being edited).
+projectStore.on('change',info=>{
+  refreshProjectList();
+  if(!activeProjectId)return;
+  const record=projectStore.get(activeProjectId);
+  if(!record){activeProjectId=null;refreshProjectList();projectMessage(info.source==='sharepoint'?'此專案已在 SharePoint 被刪除；畫面內容保留':'資料庫中沒有此專案；畫面內容保留');return;}
+  const touched=info.source==='file'||(info.pulled||[]).includes(activeProjectId)||(info.restored||[]).includes(activeProjectId);
+  if(!touched||projectDirty||record.updated_at===activeRecordStamp)return;
+  try{fill(calculate(record.design).design);activeRecordStamp=record.updated_at;projectDirty=false;projectMessage(info.source==='sharepoint'?'已載入同事在 SharePoint 更新的版本':'已從資料庫檔案載入');invalidate();submitProjectModel();}
+  catch(e){projectMessage(e.message,true);}
+});
+const storageUI=setupStorageUI({db:projectStore,fileDb:localFile,sp:spSync,onNotice:message=>projectMessage(message)});
 $('project-save').addEventListener('click',()=>saveProject());
 $('project-save-as').addEventListener('click',()=>saveProject(true));
 $('project-select').addEventListener('change',()=>{
   const id=$('project-select').value;if(!id)return;
   try{
     const record=projectStore.get(id);if(!record)throw new Error('找不到這個專案。');
-    const design=calculate(record.design).design;projectStore.activate(id);activeProjectId=id;fill(design);refreshProjectList();
+    const design=calculate(record.design).design;projectStore.activate(id);activeProjectId=id;activeRecordStamp=record.updated_at;fill(design);refreshProjectList();
     projectDirty=false;projectMessage('已載入儲存專案');invalidate();submitProjectModel();
   }catch(e){projectMessage(e.message,true);}
 });
@@ -287,7 +305,7 @@ $('project-delete').addEventListener('click',()=>{
 });
 
 $('design-form').addEventListener('input',event=>{
-  if(['project-name','pa-model'].includes(event.target.id)){
+  if(['project-name','pa-brand','pa-model'].includes(event.target.id)){
     try{syncProjectMetadata();markDirty();}
     catch(e){projectMetadataValid=false;downloadButtons.forEach(id=>$(id).disabled=true);$('download-layout').disabled=true;projectMessage(e.message,true);}
     return;
@@ -304,13 +322,6 @@ $('design-form').addEventListener('focusin',event=>{
     clearTimeout(previewTimer);refreshPreview();if(event.target.classList.contains('tolerance-input'))viewer.selectTolerance(event.target.dataset.fieldKey);else viewer.selectDimension(event.target.name);
   }
 });
-$('reset').addEventListener('click',()=>{activeProjectId=null;fill(structuredClone(defaults));refreshProjectList();markDirty('新專案尚未儲存');invalidate();submitProjectModel();});
-$('import').addEventListener('click',()=>$('import-file').click());
-$('import-file').addEventListener('change',async event=>{
-  const file=event.target.files[0];if(!file)return;
-  try{if(file.size>128*1024)throw new Error('參數檔請小於128 KB。');const r=calculate(parse(await file.text(),{maxAliasCount:50}));activeProjectId=null;fill(r.design);refreshProjectList();markDirty('匯入內容尚未儲存');invalidate();submitProjectModel();}
-  catch(e){error(`匯入失敗：${e.message}`);}event.target.value='';
-});
 for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
   viewer.setMode(mode);if(['copper','preform'].includes(mode)){part=mode;$('export-part').value=mode;}
 });
@@ -326,7 +337,7 @@ $('view-grid').addEventListener('click',()=>{viewer.setGridVisible(!viewer.grid?
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
 $('calculation-guide-open').addEventListener('click',showCalculationGuide);
-$('help-open').addEventListener('click',()=>$('help-dialog').showModal());
+$('help-open').addEventListener('click',()=>{$('settings-dialog').close();$('help-dialog').showModal();});
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
 function renderTrial(r){
@@ -336,6 +347,7 @@ function renderTrial(r){
   $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(2)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(2)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
   document.querySelector('.trial-selection').dataset.status=r.trial_status;
   inputFor('preform.thickness_override').value=r.model_thickness.toFixed(2);
+  const zTolerance=toleranceSuffix(r.design,'preform.thickness_override');$('thickness-tolerance-text').textContent=zTolerance?`${zTolerance} mm`:'公差未指定';
 }
 $('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);markDirty();});
 // Locking records the verified trial. It is written to storage immediately only
@@ -500,7 +512,7 @@ $('download-zip').addEventListener('click', async () => {
 });
 
 
-initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');
+initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');storageUI.start();
 // The JavaScript preview is shown first; the OpenCascade WebAssembly engine
 // (several MB) is fetched and the export model built once the page is idle.
 const buildWhenIdle=()=>submitProjectModel();

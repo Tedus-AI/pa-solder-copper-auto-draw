@@ -35,7 +35,8 @@ export class CADViewer {
     for(const name of ['setDesign','renderModels','renderFallback','setMode','setReference','setGridVisible','setTransparency','setExploded','setView','fitCamera','clearAnnotation','selectTolerance','selectDimension']){
       const method=this[name];this[name]=(...args)=>{const value=method.apply(this,args);this.requestRender();return value;};
     }
-    this.transparent={copper:false,preform:false,pcb:true,pa:false,epad:false};this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:false};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
+    // Every part starts visible and solid; ◐ makes one see-through.
+    this.transparent={copper:false,preform:false,pcb:false,pa:false,epad:false};this.mode='assembly';this.refs={copper:true,preform:true,pcb:true,pa:true,epad:true};this.exploded=false;this.key=null;this.toleranceFocus=null;this.scale=50;this.lastOrthographicView='top';
     this.scene=new THREE.Scene();this.camera=createCADCamera();this.camera.position.set(50,-60,50);
     this.target=new THREE.Vector3();this.models=new THREE.Group();this.scene.add(this.models);
     this.overlay=svgNode('svg',{'class':'dimension-overlay','aria-label':'尺寸定位標註'});container.append(this.overlay);
