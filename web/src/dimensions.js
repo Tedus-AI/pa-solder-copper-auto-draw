@@ -55,7 +55,12 @@ export function dimensionFor(key,r,layout){
  // A full-width edge can be measured on either parallel side. Offer both so the
  // viewer can attach the extension lines to the side next to the dimension line
  // instead of dragging them across the part from the far edge.
- if(EDGE_DIMENSIONS.has(key))dimension.anchorCandidates=[{a:dimension.a,b:dimension.b},mirroredEdge(dimension.a,dimension.b)];
+ // Side views also offer the edge of the part's other face (top or bottom).
+ if(EDGE_DIMENSIONS.has(key)){
+  const levels=key.startsWith('copper.')?[z.base,0]:key.startsWith('boss.')?[z.boss,z.base]:key.startsWith('preform.')?[0,r.model_thickness]:[dimension.a[2]];
+  const at=(p,h)=>[p[0],p[1],h];
+  dimension.anchorCandidates=levels.flatMap(h=>[{a:at(dimension.a,h),b:at(dimension.b,h)},mirroredEdge(at(dimension.a,h),at(dimension.b,h))]);
+ }
  const movePoint=a=>[a[0]+cx,a[1]+cy,a[2]],relative=key.startsWith('package.')||key.startsWith('pcb.')||['boss.length','boss.width','boss.total_height','copper.pad_size','stack.lead_solder','stack.flange_gap','stack.pad_height'].includes(key);
  if(relative){dimension.a=movePoint(dimension.a);dimension.b=movePoint(dimension.b);dimension.anchorCandidates=dimension.anchorCandidates?.map(({a,b})=>({a:movePoint(a),b:movePoint(b)}));}
  dimension.kind=dimensionSpecs[key]?.kind||'linear';dimension.view=key==='package.support_height'?'right':Math.abs(dimension.b[2]-dimension.a[2])>1e-8?'front':'top';

@@ -198,14 +198,19 @@ test('E and F can attach to either parallel edge of the base', () => {
   const r = design(),
     c = r.design.copper;
   const f = dimensionFor('copper.base_width', r, null);
-  assert.equal(f.anchorCandidates.length, 2);
+  assert.equal(f.anchorCandidates.length, 4);
   assert.deepEqual(
-    f.anchorCandidates.map(({ a }) => a[0]),
-    [-c.base_length / 2, c.base_length / 2],
+    f.anchorCandidates.map(({ a }) => [a[0], a[2]]),
+    [
+      [-c.base_length / 2, c.base_thickness],
+      [c.base_length / 2, c.base_thickness],
+      [-c.base_length / 2, 0],
+      [c.base_length / 2, 0],
+    ],
   );
   const e = dimensionFor('copper.base_length', r, null);
   assert.deepEqual(
-    e.anchorCandidates.map(({ a }) => a[1]),
+    e.anchorCandidates.slice(0, 2).map(({ a }) => a[1]),
     [-c.base_width / 2, c.base_width / 2],
   );
   assert.deepEqual(mirroredEdge([1, -2, 3], [5, -2, 3]), { a: [1, 2, 3], b: [5, 2, 3] });

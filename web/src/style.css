@@ -293,3 +293,4 @@
 .guide-section-detail polyline{stroke:#b14520;stroke-width:1.1;fill:none}.guide-section-detail .guide-dimension-extension{stroke-width:.8}
 .guide-section-detail polygon{fill:#b14520}
 #guide-dimension-3d{height:44%;min-height:220px}
+@media(max-width:700px){.project-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.project-name-field{display:block}.project-name-field>label{display:block;margin-bottom:3px}}
