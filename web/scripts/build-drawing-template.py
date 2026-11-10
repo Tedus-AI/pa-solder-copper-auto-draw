@@ -16,7 +16,8 @@ per export are replaced by @@NAME@@ placeholders:
 
     DATE         drawing sheet date (2026/2/26 style)
     DATE_PADDED  cover release-row dates (2026/02/23 style)
-    USED_ON      project name;  PART_NO  part number;  DESCRIPTION  Cu base E*F*T
+    USED_ON      project name;  PART_NO  part number (10-character base);  DESCRIPTION  Cu base E*F*T
+    REV          drawing revision, the last 2 of the 12-character part number (00 = first release)
     SHEET/SHEETS drawing sheet number (1 of 1, or 2 of 2 after the cover)
 
 The DXF text is split into pieces that the browser reassembles: new block records go
@@ -112,17 +113,17 @@ for t in msp.query("TEXT"):
     elif key.startswith("Cu base "):
         t.dxf.text = placeholder(t, "DESCRIPTION")
     elif key == "01":
-        t.dxf.text = "00"  # REV: first release
+        t.dxf.text = placeholder(t, "REV")  # REV of the title block (00 = first release)
     elif key == "2" and abs(t.dxf.insert.y - 8.0) < 1e-6 and 95 < t.dxf.insert.x < 102:
         t.dxf.text = placeholder(t, "SHEET")
     elif key == "2" and abs(t.dxf.insert.y - 8.0) < 1e-6 and 102 < t.dxf.insert.x < 106:
         t.dxf.text = placeholder(t, "SHEETS")
 for t in msp.query("MTEXT"):  # cover title block (SHEET 1 OF 2 stays as drawn)
-    if "{01}" in t.text:
-        t.text = t.text.replace("{01}", "{00}")
+    if "{01}" in t.text:  # REV of the cover title block
+        t.text = t.text.replace("{01}", "{" + placeholder(t, "REV") + "}")
     if "348001J400" in t.text:
         t.text = t.text.replace("348001J400", placeholder(t, "PART_NO"))
-expected = {"DATE": 1, "DATE_PADDED": 2, "USED_ON": 2, "PART_NO": 2, "DESCRIPTION": 2, "SHEET": 1, "SHEETS": 1}
+expected = {"DATE": 1, "DATE_PADDED": 2, "USED_ON": 2, "PART_NO": 2, "DESCRIPTION": 2, "SHEET": 1, "SHEETS": 1, "REV": 2}
 assert replaced == expected, replaced
 
 # ── blocks: keep the ones the format and the drawing use ──

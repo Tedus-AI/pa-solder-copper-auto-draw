@@ -5,6 +5,12 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const { unzipSync, strFromU8 } = require('fflate');
+// Output names: <project>_Copper_Coin_<YYYYMMDD>, _Solder_Preform_, _Coin_Solder_Masker_ (file-names.js).
+function zipName(files,label,ext,suffix=''){
+  const re=new RegExp(`_${label}_\\d{8}${suffix}\\.${ext}$`),hits=Object.keys(files).filter(n=>re.test(n));
+  assert.equal(hits.length,1,`${label}${suffix}.${ext} in ${Object.keys(files).join(', ')}`);return hits[0];
+}
+const zipFile=(files,...args)=>files[zipName(files,...args)];
 async function withDeadline(operation,ms,label){
   let timer;
   try{return await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} timed out after ${ms}ms`)),ms);})]);}
@@ -25,7 +31,8 @@ async function withDeadline(operation,ms,label){
     assert.ok(available, `Website did not become available: ${url}`);
     const executable = process.env.CHROMIUM_PATH || (process.env.CI ? undefined : ['/usr/bin/chromium', '/usr/bin/google-chrome'].find(p => fs.existsSync(p)));
     // Use full Chromium's headless mode for WebGL, rather than headless shell.
-    browser = await chromium.launch({ executablePath: executable, channel:executable?undefined:'chromium', headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    // UTF-8 locale: Chromium falls back to "download" for Chinese file names under the C locale.
+    browser = await chromium.launch({ executablePath: executable, channel:executable?undefined:'chromium', headless: true, env:{...process.env,LANG:'C.UTF-8'}, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     page = await browser.newPage({ viewport: { width: 1920, height: 900 }, locale: 'zh-TW', acceptDownloads: true, reducedMotion: 'no-preference' });
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') console.error('Browser console:', m.text()); });
@@ -46,9 +53,9 @@ async function withDeadline(operation,ms,label){
     assert.equal(chips.length,2);assert.ok(Math.abs(chips[0].top-chips[1].top)<1&&chips[1].left>chips[0].right-1,'status chips are side by side');
     assert.match(await page.locator('#status-sharepoint').textContent(),/SharePoint.*未連線/);assert.match(await page.locator('#status-local').textContent(),/本機.*瀏覽器暫存/);
     for(const selector of ['.local-badge','.topbar a[href*="github.com"]','#reset','#import','.topbar #help-open'])assert.equal(await page.locator(selector).count(),0,`${selector} removed`);
-    // Project row above the design heading; name, brand and model on one line.
-    const rows=await page.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect();return{name:r('project-name'),brand:r('pa-brand'),model:r('pa-model'),heading:document.querySelector('.control-heading').getBoundingClientRect()};});
-    assert.ok(Math.abs(rows.name.top-rows.brand.top)<2&&Math.abs(rows.brand.top-rows.model.top)<2&&rows.name.right<rows.brand.left&&rows.brand.right<rows.model.left,`one row: ${JSON.stringify(rows)}`);
+    // Project row above the design heading; name, project ID, brand and model on one line.
+    const rows=await page.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect();return{name:r('project-name'),id:r('project-id'),brand:r('pa-brand'),model:r('pa-model'),heading:document.querySelector('.control-heading').getBoundingClientRect()};});
+    assert.ok(Math.abs(rows.name.top-rows.id.top)<2&&Math.abs(rows.id.top-rows.brand.top)<2&&Math.abs(rows.brand.top-rows.model.top)<2&&rows.name.right<rows.id.left&&rows.id.right<rows.brand.left&&rows.brand.right<rows.model.left,`one row: ${JSON.stringify(rows)}`);
     assert.ok(rows.heading.top>rows.name.bottom,'設計尺寸 heading sits below the project row');
     await page.locator('#project-options-toggle').click();assert.equal(await page.locator('#project-options').isVisible(),true);assert.match(await page.locator('#project-options').textContent(),/SharePoint/);
     await page.mouse.click(5,300);assert.equal(await page.locator('#project-options').isVisible(),false,'clicking elsewhere closes the list');
@@ -203,6 +210,12 @@ async function withDeadline(operation,ms,label){
         const fits=await page.locator('.dimension-value').evaluate(group=>{const box=group.querySelector('rect').getBBox(),text=group.querySelector('.dimension-number').getBBox();return text.x>=box.x+5&&text.x+text.width<=box.x+box.width-5;});
         assert.ok(fits,`Notation exceeds its allocated width: ${key}`);
       }
+      // Overall E/F sizes: extension lines start at the edge next to the dimension line,
+      // never across the part from the opposite edge.
+      if(['copper.base_length','copper.base_width'].includes(key)&&state.label&&!state.collapsed){
+        const across=key==='copper.base_width'?state.bounds.right-state.bounds.left:state.bounds.bottom-state.bounds.top;
+        assert.ok(state.extensionLength<across,`Extension lines of ${key} cross the part: ${JSON.stringify(state)}`);
+      }
       return state;
     };
     // Demonstrate every field, then check its label against the actual projected
@@ -301,26 +314,30 @@ async function withDeadline(operation,ms,label){
       const button=page.locator(`[data-transparency=${component}]`),before=await button.getAttribute('aria-pressed');await button.click();assert.equal(await page.locator(`#ref-${component}`).isChecked(),true);const opacity=JSON.parse(await page.locator('#viewer').getAttribute('data-component-opacities'))[component];assert.deepEqual(opacity,[before==='true'?1:.18]);await button.click();
     }
     await page.locator('#view-iso-bottom').click();assert.equal(await page.locator('#viewer').getAttribute('data-camera-view'),'iso-bottom');assert.equal(await page.locator('#view-orthographic').getAttribute('aria-pressed'),'false');await page.locator('.viewer-panel').screenshot({path:path.join(output,'flipped-isometric.png')});await page.locator('#view-iso').click();
-    const projectMetadata={name:'基地台 PA 專案 / 測試',pa_brand:'Ampleon',pa_model:'H-37248KC-6/2'};
-    await page.locator('#project-name').fill(projectMetadata.name);await page.locator('#pa-brand').fill(projectMetadata.pa_brand);
+    const projectMetadata={name:'基地台 PA 專案 / 測試',project_id:'PJ-2026-001',pa_brand:'Ampleon',pa_model:'H-37248KC-6/2'};
+    await page.locator('#project-name').fill(projectMetadata.name);await page.locator('#project-id').fill(projectMetadata.project_id);await page.locator('#pa-brand').fill(projectMetadata.pa_brand);
     await page.locator('#pa-model').fill(projectMetadata.pa_model);
     assert.equal(await page.locator('#download-zip').isDisabled(),false,'Metadata edits must preserve the verified CAD model');
     const downloaded = page.waitForEvent('download'); await page.locator('#download-zip').click();
-    const download = await downloaded; const file = path.join(output, 'pa_780_m1p.zip'); await download.saveAs(file);
+    const download = await downloaded; assert.match(download.suggestedFilename(),/^基地台 PA 專案 _ 測試_PA_Copper_CAD_\d{8}\.zip$/,'project name with "/" made safe');
+    const file = path.join(output, 'pa_780_m1p.zip'); await download.saveAs(file);
     const files = unzipSync(fs.readFileSync(file));
-    for (const name of ['copper.step', 'preform.step', 'copper.dxf', 'preform.dxf', 'copper_drawing.dxf', 'layout_solder_mask.dxf', 'report.json', 'creo_job.json', 'creo_runner.py', 'WINDOWS_CREO7.md']) assert.ok(files[name], `Missing ${name}`);
-    // 2D drawing in the company format: Big5 text, cover sheet included by default
-    const sheetDrawing=new TextDecoder('big5').decode(files['copper_drawing.dxf']);
+    for (const name of ['report.json', 'creo_job.json', 'creo_runner.py', 'WINDOWS_CREO7.md']) assert.ok(files[name], `Missing ${name}`);
+    for (const label of ['Copper_Coin','Solder_Preform']) for (const [ext,suffix] of [['step'],['stl'],['dxf'],['pdf'],['dxf','_outline']]) zipName(files,label,ext,suffix);
+    // 2D drawings in the company format: Big5 text, cover sheet included by default
+    const sheetDrawing=new TextDecoder('big5').decode(zipFile(files,'Copper_Coin','dxf'));
     assert.match(sheetDrawing,/\$ACADVER\n {2}1\nAC1015\n/);assert.ok(sheetDrawing.includes('1.發行圖面')&&sheetDrawing.includes('348XXXXXXX'));
     assert.equal(sheetDrawing.split(`\n${projectMetadata.name}\n`).length-1,2,'USED ON on the cover and the drawing sheet');
-    assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).sort(),['copper.step','preform.step']);
-    assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.stl')).sort(),['copper.stl','preform.stl']);
-    assert.ok(strFromU8(files['layout_solder_mask.dxf']).includes('EPAD_OPENING'));
-    for (const name of ['copper.step', 'preform.step']) assert.ok(strFromU8(files[name]).includes('ISO-10303-21;'));
+    const preformSheet=new TextDecoder('big5').decode(zipFile(files,'Solder_Preform','dxf'));
+    assert.ok(preformSheet.includes('1.Material:96.5Sn3Ag0.5Cu COATED WITH 0.5%F8 FLUX')&&preformSheet.includes('Solder preform 20.6*9.8*'),'preform drawing notes and description');
+    for (const label of ['Copper_Coin','Solder_Preform']) {const pdf=zipFile(files,label,'pdf');assert.equal(strFromU8(pdf.slice(0,5)),'%PDF-');assert.equal((strFromU8(pdf).match(/\/Type \/Page\b/g)||[]).length,2,'cover + drawing page');}
+    assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).length,2);
+    assert.ok(strFromU8(zipFile(files,'Coin_Solder_Masker','dxf')).includes('EPAD_OPENING'));
+    for (const label of ['Copper_Coin','Solder_Preform']) assert.ok(strFromU8(zipFile(files,label,'step')).includes('ISO-10303-21;'));
     const report = JSON.parse(strFromU8(files['report.json']));
     assert.equal(report.verification, 'volume_and_step_roundtrip_passed'); assert.equal(report.native_prt.status, 'not_generated');
     assert.equal(report.reference_geometry.pcb,'display_only');assert.equal(report.reference_geometry.pa,'display_only');
-    assert.deepEqual([report.drawing.file,report.drawing.cover_sheet,report.drawing.sheets,report.drawing.view_scale],['copper_drawing.dxf',true,2,'3:2']);
+    assert.deepEqual([report.drawings.copper.dxf,report.drawings.cover_sheet,report.drawings.sheets,report.drawings.copper.view_scale,report.drawings.preform.view_scale,report.drawings.copper.rev],[zipName(files,'Copper_Coin','dxf'),true,2,'3:2','3:1','00']);
     assert.ok(report.layout.epad_cells>200);
     assert.ok(Math.abs(report.cad_volumes_mm3.preform - 68.97470674352311) < .001);
     const hashes = JSON.parse(strFromU8(files['sha256.json']));
@@ -335,7 +352,7 @@ async function withDeadline(operation,ms,label){
       const event=page.waitForEvent('download');await page.locator('#download-zip').click();
       const customPath=path.join(output,'four-corners.zip');await(await event).saveAs(customPath);
       const custom=unzipSync(fs.readFileSync(customPath));
-      assert.equal((strFromU8(custom['copper.dxf']).match(/\nCIRCLE\n/g)||[]).length,4);
+      assert.equal((strFromU8(zipFile(custom,'Copper_Coin','dxf','_outline')).match(/\nCIRCLE\n/g)||[]).length,4);
       assert.equal(JSON.parse(strFromU8(custom['creo_job.json'])).native_parameters.copper.HOLE_MASK,15);
       await resetToDefaults();
     }
@@ -356,7 +373,7 @@ async function withDeadline(operation,ms,label){
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'corner-breakouts.png')});
     const brokenDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const brokenFile=path.join(output,'broken-corners.zip');await(await brokenDownload).saveAs(brokenFile);
     const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['report.json']));
-    assert.equal(broken.results.hole_breakouts,2);assert.equal((strFromU8(brokenFiles['copper.dxf']).match(/\nCIRCLE\n/g)||[]).length,0);
+    assert.equal(broken.results.hole_breakouts,2);assert.equal((strFromU8(zipFile(brokenFiles,'Copper_Coin','dxf','_outline')).match(/\nCIRCLE\n/g)||[]).length,0);
     assert.equal(broken.verification,'volume_and_step_roundtrip_passed');
     await resetToDefaults();
     // Auto linkage must update the readonly fields, preview, thickness and actual exports.
@@ -414,7 +431,7 @@ async function withDeadline(operation,ms,label){
     await resetToDefaults();
     await page.locator('#tab-preform').click();
     const stepDownload = page.waitForEvent('download'); await page.locator('#download-step').click();
-    assert.match((await stepDownload).suggestedFilename(), /preform\.step$/);
+    assert.match((await stepDownload).suggestedFilename(), /_Solder_Preform_\d{8}\.step$/);
     const preformGroup=page.locator('details[data-group="preform"]');
     if(!await preformGroup.evaluate(e=>e.open))await preformGroup.locator('summary').click();
     await page.locator('#trial-choice').selectOption('upper');
@@ -426,16 +443,47 @@ async function withDeadline(operation,ms,label){
     await page.locator('#layout-epad_size').focus();
     assert.equal(await page.locator('#viewer').getAttribute('data-view-mode'),'layout');
     assert.equal(await page.locator('#viewer').getAttribute('data-dimension'),'layout.epad_size');
-    const layoutDownload=page.waitForEvent('download');await page.locator('#download-layout').click();
-    const layoutFile=await layoutDownload;assert.match(layoutFile.suggestedFilename(),/layout_solder_mask\.dxf$/);
+    // E-PAD in the part list: its DXF is the Layout 綠漆 / E-PAD drawing; no STEP or 2D drawing
+    await page.locator('#export-part').selectOption('layout');
+    for(const id of ['download-step','download-drawing','download-drawing-pdf'])assert.equal(await page.locator(`#${id}`).isDisabled(),true,id);
+    assert.equal(await page.locator('#part-number-group').isVisible(),false);
+    const layoutDownload=page.waitForEvent('download');await page.locator('#download-dxf').click();
+    const layoutFile=await layoutDownload;assert.match(layoutFile.suggestedFilename(),/_Coin_Solder_Masker_\d{8}\.dxf$/);
     await layoutFile.saveAs(path.join(output,'layout_solder_mask.dxf'));
     // 2D drawing from the preview; without the cover it is SHEET 1 OF 1
+    await page.locator('#export-part').selectOption('copper');
+    // Part number: 10 characters + REV; it fills PART NO. and REV of the title block and can be locked
+    await page.locator('#part-no').fill('348001j4-0001');assert.equal(await page.locator('#part-no').inputValue(),'348001J400');
+    assert.equal(await page.locator('#part-rev').inputValue(),'01','a pasted 12-character number fills the REV');
+    await page.locator('#part-rev').selectOption('02');assert.match(await page.locator('#part-no-full').textContent(),/348001J40002/);
+    await page.locator('#part-lock').click();assert.equal(await page.locator('#part-lock').getAttribute('aria-pressed'),'true');assert.equal(await page.locator('#part-rev').isDisabled(),true);
+    assert.equal(await page.locator('#part-no').getAttribute('readonly'),'');
     await page.locator('#drawing-cover').uncheck();
     const drawingDownload=page.waitForEvent('download');await page.locator('#download-drawing').click();
-    const drawingFile=await drawingDownload;assert.match(drawingFile.suggestedFilename(),/_copper_drawing\.dxf$/);
+    const drawingFile=await drawingDownload;assert.match(drawingFile.suggestedFilename(),/_Copper_Coin_\d{8}\.dxf$/);
     const drawingPath=path.join(output,'copper_drawing.dxf');await drawingFile.saveAs(drawingPath);
     const drawingText=new TextDecoder('big5').decode(fs.readFileSync(drawingPath));
     assert.ok(!drawingText.includes('發行圖面')&&drawingText.includes('截面'),'drawing sheet only');
+    assert.ok(drawingText.includes('\n348001J400\n')&&drawingText.includes('\n02\n'),'PART NO. and REV from the part number');
+    // 2D drawing PDF: A4 landscape sheet only; with no watermark uploaded the option is unavailable
+    assert.equal(await page.locator('#drawing-watermark').isDisabled(),true);
+    const pdfDownload=page.waitForEvent('download');await page.locator('#download-drawing-pdf').click();
+    const pdfFile=await pdfDownload;assert.match(pdfFile.suggestedFilename(),/_Copper_Coin_\d{8}\.pdf$/);
+    const pdfPath=path.join(output,'copper_drawing.pdf');await pdfFile.saveAs(pdfPath);const pdfText=fs.readFileSync(pdfPath,'latin1');
+    assert.ok(pdfText.startsWith('%PDF-')&&(pdfText.match(/\/Type \/Page\b/g)||[]).length===1&&/\/MediaBox \[ 0 0 841\.89 595\.28 \]/.test(pdfText),'one A4 landscape page');
+    // Watermark: uploaded in 設定, kept outside the project database, placed behind the content
+    await page.locator('#settings-open').click();
+    await page.locator('#wm-file').setInputFiles(path.join(__dirname,'..','..','浮水印.pdf'));
+    await page.waitForFunction(()=>/浮水印\.pdf/.test(document.getElementById('settings-wm-file').textContent));
+    assert.match(await page.locator('#settings-wm-message').textContent(),/此瀏覽器/);
+    assert.deepEqual(await page.evaluate(()=>['wm-scale','wm-opacity','wm-rotation'].map(id=>document.getElementById(id).value)),['80','50','0']);
+    assert.ok(!(await page.evaluate(()=>Object.keys(localStorage).map(k=>localStorage.getItem(k)).join(''))).includes('%PDF'),'the watermark file is not in the project database');
+    await page.locator('#settings-close').click();
+    assert.equal(await page.locator('#drawing-watermark').isDisabled(),false);await page.locator('#drawing-watermark').check();
+    const markedDownload=page.waitForEvent('download');await page.locator('#download-drawing-pdf').click();
+    const markedPath=path.join(output,'copper_drawing_watermark.pdf');await(await markedDownload).saveAs(markedPath);const marked=fs.readFileSync(markedPath,'latin1');
+    assert.ok(/\/Wm0 \d+ 0 R/.test(marked)&&/\/S \/Transparency/.test(marked)&&/\/ca 0\.5/.test(marked),'watermark XObject in a transparency group at 50% opacity');
+    await page.locator('#part-lock').click();await page.locator('#part-no').fill('');await page.locator('#part-rev').selectOption('00');
     assert.equal(await page.locator('#error').isVisible(),false);
     await page.locator('#drawing-cover').check();
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});

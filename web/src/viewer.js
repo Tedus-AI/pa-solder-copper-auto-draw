@@ -253,7 +253,7 @@ export class CADViewer {
     const bounds={left:Math.min(...projected.map(p=>p[0])),right:Math.max(...projected.map(p=>p[0])),top:Math.min(...projected.map(p=>p[1])),bottom:Math.max(...projected.map(p=>p[1]))};
     const origin=this.el.getBoundingClientRect(),cube=this.el.querySelector('.view-cube').getBoundingClientRect();
     const obstacles=[{left:cube.left-origin.left,right:cube.right-origin.left,top:cube.top-origin.top,bottom:cube.bottom-origin.top}];
-    let candidates=d.kind==='radius'&&d.radiusCandidates?.length?d.radiusCandidates:[{a:d.a,b:d.b}];
+    let candidates=d.kind==='radius'&&d.radiusCandidates?.length?d.radiusCandidates:d.anchorCandidates?.length?d.anchorCandidates:[{a:d.a,b:d.b}];
     if(d.kind==='diameter'){
       // Equivalent holes share one nominal diameter. Choose the real hole and
       // a true in-plane diameter direction that gives the shortest available
@@ -267,7 +267,10 @@ export class CADViewer {
       const layout=annotationLayout({a:this.project(world.a),b:this.project(world.b),bounds,width,height,labelWidth:this.labelWidth(),labelHeight:this.labelHeight(),obstacles,kind:d.kind});
       const path=d.kind==='radius'?layout.leader:['diameter','envelope'].includes(d.kind)?featureLeader(layout.a,layout.b,bounds,layout.label,layout.side):[];
       const length=path.slice(1).reduce((sum,p,i)=>sum+Math.hypot(p[0]-path[i][0],p[1]-path[i][1]),0);
-      return{world,index,layout,path,length,score:layout.label?length:Infinity};
+      // Linear dimensions: the shortest extension lines win, i.e. the measured
+      // edge next to the dimension line (drafting practice), in every view.
+      const extension=['radius','diameter','envelope'].includes(d.kind)||!layout.label?0:Math.hypot(layout.aa[0]-layout.a[0],layout.aa[1]-layout.a[1])+Math.hypot(layout.bb[0]-layout.b[0],layout.bb[1]-layout.b[1]);
+      return{world,index,layout,path,length,extension,score:layout.label?length+extension:Infinity};
     });
     const chosen=choices.sort((a,b)=>Math.abs(a.score-b.score)<1e-6?a.index-b.index:a.score-b.score)[0],layout=chosen.layout;
     this.overlay.setAttribute('viewBox',`0 0 ${width} ${height}`);this.overlay.replaceChildren();
@@ -342,7 +345,7 @@ export class CADViewer {
       if(d.datums&&width>=600)d.datums.forEach((value,i)=>{const text=svgNode('text',{x:cx,y:box.top+39+i*15,class:'dimension-datum-text'});text.textContent=value;group.append(text);});
       this.overlay.append(group);
     }
-    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:chosen.world.a,worldB:chosen.world.b,kind:d.kind,referenceCandidate:chosen.index,leaderLength:chosen.length,labelAngle:layout.textTransform?.angle||0,radiusLeaderStraight:isRadius,markerCount:isRadius||isEnvelope?1:2});
+    this.el.dataset.annotationLayout=JSON.stringify({bounds,label:layout.label,a:layout.a,b:layout.b,side:layout.side,collapsed:layout.collapsed,worldA:chosen.world.a,worldB:chosen.world.b,kind:d.kind,referenceCandidate:chosen.index,leaderLength:chosen.length,extensionLength:chosen.extension,labelAngle:layout.textTransform?.angle||0,radiusLeaderStraight:isRadius,markerCount:isRadius||isEnvelope?1:2});
   }
   selectTolerance(key,fit=true){this.selectDimension(key,fit,{tolerance:true});}
   selectDimension(key,fit=true,{tolerance=false}={}) {
@@ -355,7 +358,7 @@ export class CADViewer {
       const center=this.r.boss_center||[0,0],p=this.r.design.package,maximum=this.r.pa_envelope;
       const length=maximum?.max_length??p.length+(p.max_tolerance||0),width=maximum?.max_width??p.width+(p.max_tolerance||0),height=referenceLevels(this.r).flange;
       const endpoint=key==='package.width'?[center[0],center[1]+width/2,height]:[center[0]+length/2,center[1],height];
-      dimension.a=endpoint;dimension.b=[...endpoint];
+      dimension.a=endpoint;dimension.b=[...endpoint];dimension.anchorCandidates=null;
     }
     this.key=key;this.exploded=false;
     if(fit){

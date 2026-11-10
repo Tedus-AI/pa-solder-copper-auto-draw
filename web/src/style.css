@@ -150,7 +150,7 @@
  #fields{gap:4px}.control-region{gap:5px}.control-group summary{height:21px;padding-top:2px;padding-bottom:2px}.dimension-row{height:22px;min-height:22px}.controls .dimension-row input{height:21px;min-height:21px}.tolerance-grid,.field-grid{padding-top:1px;padding-bottom:2px}.dimension-head{height:14px;line-height:13px}.group-hint{padding-bottom:2px;line-height:12px}.linked-controls{padding-bottom:2px}.linked-controls p{line-height:12px}.gap-analysis{padding-top:2px;padding-bottom:2px;margin-bottom:2px}.gap-analysis p{line-height:11px}.gap-analysis th,.gap-analysis td{line-height:14px}.copper-subgroup h3{padding-top:1px;line-height:12px}.control-region .control-column{gap:4px}
 }
 @media(max-width:700px){
- .project-fields{gap:7px;padding:7px 9px}.project-fields label{display:block;font-size:10px}.project-fields label>span{display:block;margin-bottom:3px}.project-fields input{width:100%;height:29px}.project-toolbar{flex-wrap:wrap;padding:5px 8px;gap:4px}.project-toolbar select{flex-basis:155px;height:27px}.project-toolbar button{height:27px;font-size:10px}#project-save-status{max-width:none;flex-basis:100%}
+ .project-fields{gap:7px;padding:7px 9px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.project-fields label{display:block;font-size:10px}.project-fields label>span{display:block;margin-bottom:3px}.project-fields input{width:100%;height:29px}.project-toolbar{flex-wrap:wrap;padding:5px 8px;gap:4px}.project-toolbar select{flex-basis:155px;height:27px}.project-toolbar button{height:27px;font-size:10px}#project-save-status{max-width:none;flex-basis:100%}
  #fields{gap:6px}.control-region,.control-region .control-column{display:contents}.control-group[data-group=package]{order:0}.control-group[data-group=pcb]{order:1}.integrated-copper{order:2}.control-group[data-group=stack]{order:3}.control-group[data-group=preform]{order:4}.control-group[data-group=layout]{order:5}
  .copper-sections{grid-template-columns:minmax(0,1fr)}.copper-subgroup+ .copper-subgroup{border-left:0;border-top:1px solid #e5ebe1}.copper-subgroup h3{font-size:11px;line-height:16px;padding:5px 8px 0}.lower-controls .control-group{height:auto}
 }
@@ -214,8 +214,11 @@
 @media(max-width:700px){.save-chip .chip-name{display:none}.topbar .save-chip{padding:2px 6px}}
 
 /* ───── Project row: 專案名稱 (AI-Thermal combobox) | PA 品牌 | PA 型號 ───── */
-.project-fields{grid-template-columns:minmax(0,1.6fr) minmax(0,.9fr) minmax(0,1.1fr)}
-.project-name-field{display:flex;gap:6px;align-items:center;min-width:0;font-size:10px;color:#657b60;white-space:nowrap}
+/* Four fields share the one row: 專案名稱 | 專案ID | PA 品牌 | PA 型號. Labels stay on
+   the left of each input; the ID and brand columns are the narrow ones. */
+.project-fields{grid-template-columns:minmax(0,1.38fr) minmax(0,.74fr) minmax(0,.72fr) minmax(0,1.16fr);column-gap:7px}
+.project-fields label{gap:4px}
+.project-name-field{display:flex;gap:4px;align-items:center;min-width:0;font-size:10px;color:#657b60;white-space:nowrap}
 .combobox{position:relative;flex:1;min-width:0;display:flex}
 .combobox input{padding-right:22px}
 .combobox>button{position:absolute;right:1px;top:1px;bottom:1px;width:20px;border:0;border-left:1px solid #e4ebe1;border-radius:0 3px 3px 0;background:#f5f8f2;color:#55715a;font-size:10px;padding:0;cursor:pointer}
@@ -247,3 +250,47 @@
 .conflict-actions{padding:6px 8px;border-radius:5px;background:#fff1ec;color:#9b3a25;font-size:11px}
 .settings-section output{display:block;min-height:1.2em;font-size:11px;color:#3f6a47}
 .settings-section output.save-error{color:#b23a2a}
+
+/* ───── Export row: part, its part number (10 + REV, lock), drawing outputs ───── */
+.part-number{display:flex;align-items:center;gap:4px;min-width:0;font-size:10px;color:#6f8468;white-space:nowrap}
+.part-number>label{font-size:10px;color:#829274}
+.part-number input{width:96px;height:26px;border:1px solid #dfe7d6;border-radius:4px;padding:3px 6px;font:500 11px/1 "SFMono-Regular",Consolas,monospace;letter-spacing:.4px;color:#2b4a36;background:#fff;text-transform:uppercase}
+.part-number input:focus{outline:2px solid #f3d7b9;border-color:#c0834e;background:#fffaf2}
+.part-number input[readonly]{background:#f3f6ef;color:#4f6a50}
+.part-number select{height:26px;background:#fafcf6;color:#496648;border:1px solid #dfe7d6;border-radius:4px;padding:2px 3px;font-size:10px}
+.part-number button{height:26px;min-width:26px;border:1px solid #dfe7d6;border-radius:4px;background:#f7faf3;font-size:12px;padding:0 4px}
+.part-number[data-state=locked] button{background:#eaf3e4;border-color:#b9d1b2}
+.part-number output{font:10px "SFMono-Regular",Consolas,monospace;color:#7b8f71;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.part-number[data-state=partial] output{color:#a8622f}
+.cover-option.inactive,.cover-option.unavailable{opacity:.45}
+.cover-option.unavailable input{cursor:not-allowed}
+@media(min-width:981px){.export-panel .part-number{flex:1 1 auto;justify-content:center}}
+@media(min-width:981px) and (max-width:1450px){.part-number>label{font-size:9px}.part-number input{width:84px;font-size:10px}.part-number output{display:none}}
+@media(max-width:980px){.part-number{order:3;width:100%}.export-actions{flex-wrap:wrap}}
+
+/* ───── Settings: watermark appearance (Acrobat 「新增浮水印」 values) ───── */
+.wm-appearance{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:4px 0;font-size:11px;color:#5d7558}
+.wm-appearance label{display:flex;align-items:center;gap:4px}
+.wm-appearance input{width:58px;height:24px;border:1px solid #d6e1cd;border-radius:3px;padding:2px 5px;font-size:11px}
+.wm-appearance button{border:1px solid #cfdcc9;border-radius:4px;background:#f4f8f1;color:#3e6045;font-size:11px;padding:3px 9px}
+#settings-wm-message{display:block;font-size:11px;color:#5f7d58}#settings-wm-message.save-error{color:#a74324}
+
+/* ───── Dimension inspector: offset dimensions, 局部放大 inset, h section ───── */
+.guide-dimension-overlay .guide-dimension-extension{stroke:#b14520;stroke-width:.8;fill:none}
+.guide-dimension-overlay text,.guide-section-detail .guide-dimension-text{font:700 12px/1 system-ui,sans-serif;fill:#9b3a17;text-anchor:middle;paint-order:stroke;stroke:#fffdf8;stroke-width:3px;stroke-linejoin:round}
+.guide-dimension-overlay .guide-detail-frame{fill:none;stroke:#7d8f74;stroke-width:1;stroke-dasharray:4 2}
+.guide-dimension-overlay .guide-detail-mark{fill:none;stroke:#c45a26;stroke-width:1.4;stroke-dasharray:3 2}
+.guide-dimension-overlay .guide-detail-leader{stroke:#c45a26;stroke-width:1;stroke-dasharray:3 2;fill:none}
+.guide-dimension-overlay .guide-detail-caption{font:600 10px/1 system-ui,sans-serif;fill:#53684e;text-anchor:start;stroke:#f5f8f1}
+.guide-section-detail{position:absolute;inset:0;background:#fbfcf8}
+.guide-section-detail svg{display:block;width:100%;height:100%}
+.guide-section-detail .guide-section-title{font:600 10px/1 system-ui,sans-serif;fill:#4e6a4a}
+.guide-section-detail .guide-section-label{font:10px/1 system-ui,sans-serif;fill:#5a4a3a}
+.guide-section-detail .guide-section-part{font:600 9px/1 system-ui,sans-serif;fill:#ffffff;paint-order:stroke;stroke:#00000055;stroke-width:2px}
+.guide-section-detail .guide-h-value{text-anchor:start}
+.guide-section-detail .guide-detail-window{fill:#e8742f22;stroke:#c45a26;stroke-width:1;stroke-dasharray:3 2}
+.guide-section-detail .guide-detail-frame{fill:none;stroke:#7d8f74;stroke-width:1}
+.guide-section-detail polyline{stroke:#b14520;stroke-width:1.1;fill:none}.guide-section-detail .guide-dimension-extension{stroke-width:.8}
+.guide-section-detail polygon{fill:#b14520}
+#guide-dimension-3d{height:44%;min-height:220px}
+@media(max-width:700px){.project-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.project-name-field{display:block}.project-name-field>label{display:block;margin-bottom:3px}}

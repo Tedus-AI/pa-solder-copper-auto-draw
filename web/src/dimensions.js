@@ -3,6 +3,10 @@ import { dimensionSpecs } from './dimension-format.js';
 import { getTolerance, toleranceSuffix, toleranceText, toleranceSource } from './tolerances.js';
 export { dimensionLabel } from './dimension-format.js';
 
+// Overall sizes of features centred on their own origin: the opposite, parallel
+// edge is an equally valid measuring datum.
+const EDGE_DIMENSIONS=new Set(['copper.base_length','copper.base_width','boss.length','boss.width','package.length','package.width','preform.length','preform.width']);
+export function mirroredEdge(a,b){const horizontal=Math.abs(b[0]-a[0])>=Math.abs(b[1]-a[1]),flip=p=>horizontal?[p[0],-p[1],p[2]]:[-p[0],p[1],p[2]];return{a:flip(a),b:flip(b)};}
 export function referenceLevels(r){const d=r.design,base=d.copper.base_thickness;return{base,boss:base+r.boss_lower_height,pad:base+r.boss_total_height,pcbBottom:base+d.stack.board_solder,pcbTop:base+d.stack.board_solder+d.pcb.thickness,flange:base+r.copper_to_flange,lead:base+r.copper_to_flange+d.package.support_height};}
 export function dimensionFor(key,r,layout){
  const d=r.design,c=d.copper,p=d.package,b=d.pcb,l=d.layout,z=referenceLevels(r),I=r.boss_length,H=r.boss_width,[cx,cy]=r.boss_center||[0,0];
@@ -48,8 +52,17 @@ export function dimensionFor(key,r,layout){
  'layout.hole_clearance':()=>v([hx-l.hole_clearance/2,hy,z.base],[hx+l.hole_clearance/2,hy,z.base],'layout',l.hole_clearance,'定位孔 E-PAD 避讓直徑 V'),
  };
  const dimension=map[key]?.();if(!dimension)return null;
+ // A full-width edge can be measured on either parallel side. Offer both so the
+ // viewer can attach the extension lines to the side next to the dimension line
+ // instead of dragging them across the part from the far edge.
+ // Side views also offer the edge of the part's other face (top or bottom).
+ if(EDGE_DIMENSIONS.has(key)){
+  const levels=key.startsWith('copper.')?[z.base,0]:key.startsWith('boss.')?[z.boss,z.base]:key.startsWith('preform.')?[0,r.model_thickness]:[dimension.a[2]];
+  const at=(p,h)=>[p[0],p[1],h];
+  dimension.anchorCandidates=levels.flatMap(h=>[{a:at(dimension.a,h),b:at(dimension.b,h)},mirroredEdge(at(dimension.a,h),at(dimension.b,h))]);
+ }
  const movePoint=a=>[a[0]+cx,a[1]+cy,a[2]],relative=key.startsWith('package.')||key.startsWith('pcb.')||['boss.length','boss.width','boss.total_height','copper.pad_size','stack.lead_solder','stack.flange_gap','stack.pad_height'].includes(key);
- if(relative){dimension.a=movePoint(dimension.a);dimension.b=movePoint(dimension.b);}
+ if(relative){dimension.a=movePoint(dimension.a);dimension.b=movePoint(dimension.b);dimension.anchorCandidates=dimension.anchorCandidates?.map(({a,b})=>({a:movePoint(a),b:movePoint(b)}));}
  dimension.kind=dimensionSpecs[key]?.kind||'linear';dimension.view=key==='package.support_height'?'right':Math.abs(dimension.b[2]-dimension.a[2])>1e-8?'front':'top';
  if(key==='copper.corner_radius')dimension.radiusCandidates=visibleRadiusCandidates;
  if(['copper.hole_diameter','layout.hole_clearance'].includes(key)){dimension.diameterCenters=centers.map(([x,y])=>[x,y,z.base]);dimension.quantity=centers.length;}

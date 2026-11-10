@@ -7,7 +7,11 @@ import { faceViews } from './camera-views.js';
 import { formatDimension } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
-import { copperDrawingDxf, drawingLayout, DRAWING_TEMPLATE_PATH, DEFAULT_PART_NO } from './copper-drawing.js';
+import { copperDrawingText, drawingLayout, encodeDxf, DRAWING_TEMPLATE_PATH } from './copper-drawing.js';
+import { preformDrawingText, preformDrawingLayout, drawnThickness } from './preform-drawing.js';
+import { emptyPartNumbers, cleanPartNo, fullPartNumber, titleBlockPartNumber, REVISIONS, PART_LABELS, PART_NO_BASE_LENGTH } from './part-numbers.js';
+import { outputFileName } from './file-names.js';
+import { WatermarkStore } from './watermark-store.js';
 import { CADViewer } from './viewer.js';
 import { ProjectDatabase } from './project-db.js';
 import { LocalFileDb } from './local-file-db.js';
@@ -19,11 +23,16 @@ import { createCalculationGuide } from './calculation-guide.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
-let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial();
+let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial(),partNumbers=emptyPartNumbers();
 const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
-const downloadButtons=['download-zip','download-dxf','download-step'];
-// Downloads made from the live preview (no CAD model needed): Layout and the 2D drawing.
-const setDraftDownloads=disabled=>['download-layout','download-drawing'].forEach(id=>$(id).disabled=disabled);
+// Export buttons follow one state: the verified CAD model (STEP, outline DXF, bundle),
+// the live preview (2D drawing DXF/PDF, E-PAD Layout DXF) and the selected part.
+const exportsRunning=new Set();
+function refreshExportButtons(){
+  const model=!!result&&projectMetadataValid,preview=!!draft&&projectMetadataValid,drawn=part!=='layout';
+  const ready={'download-zip':model,'download-step':model&&drawn,'download-dxf':drawn?model:preview,'download-drawing':preview&&drawn,'download-drawing-pdf':preview&&drawn};
+  for(const[id,ok]of Object.entries(ready))$(id).disabled=!ok||exportsRunning.has(id);
+}
 const formulaButtons=new Map();let activeFormulaButton=null;
 const calculationIds=new Set(['metric-z','metric-model','metric-volume','v-cavity','v-boss','v-area','trials']);
 const openCalculationGuide=createCalculationGuide(()=>calculate(syncLinkedFields(formValues())));
@@ -173,7 +182,7 @@ function updateToleranceLock(){
   $('design-form').classList.toggle('tolerances-unlocked',tolerancesUnlocked);
 }
 function formValues(){
-  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()};d.tolerances={};
+  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()};d.tolerances={};
   for(const path of allPaths){
     const[group,key]=path.split('.'),v=inputFor(path).value;
     if(!v&&key!=='thickness_override')throw new Error(`${titleFor(path)} 不可留空。`);
@@ -184,16 +193,16 @@ function formValues(){
       d.tolerances[path][sign]=raw===''?0:Number(raw);
     }
   }
-  d.trial_result=structuredClone(trialRecord);
+  d.trial_result=structuredClone(trialRecord);d.part_numbers=structuredClone(partNumbers);
   d.copper.hole_corners=[...document.querySelectorAll('[data-hole-corner]:checked')].map(e=>e.dataset.holeCorner);
   d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
   d.boss.size_mode=$('boss-size-auto').checked?'auto':'manual';d.boss.height_mode='auto';
   return d;
 }
 function fill(d){
-  trialRecord=structuredClone(d.trial_result??emptyTrial());
+  trialRecord=structuredClone(d.trial_result??emptyTrial());partNumbers=structuredClone(d.part_numbers??emptyPartNumbers());renderPartNumber();
   projectMetadataValid=true;$('name').value=d.name;
-  $('project-name').value=d.project?.name??d.name??'未命名專案';$('pa-brand').value=d.project?.pa_brand??'';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
+  $('project-name').value=d.project?.name??d.name??'未命名專案';$('project-id').value=d.project?.project_id??'';$('pa-brand').value=d.project?.pa_brand??'';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
   document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
@@ -230,13 +239,13 @@ function refreshPreview(showError=false){
   try{
     const r=calculate(syncLinkedFields(formValues())),layout=layoutFor(r);draft={results:r,layout};
     viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
-    setDraftDownloads(false);$('viewer').dataset.previewValid='true';
+    refreshExportButtons();$('viewer').dataset.previewValid='true';
     $('model-size').textContent=[['E',r.design.copper.base_length],['F',r.design.copper.base_width],['G',r.design.copper.base_thickness]].map(([name,value])=>formatDimension(name,value)).join(' · ');
     return draft;
-  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';setDraftDownloads(true);$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
+  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';refreshExportButtons();$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
 }
 function invalidate(){
-  revision++;result=null;error('');downloadButtons.forEach(id=>$(id).disabled=true);setDraftDownloads(true);
+  revision++;result=null;error('');refreshExportButtons();
   document.body.classList.remove('ready');$('viewer').dataset.ready='false';$('preview-state').textContent='即時預覽 · 出圖待更新';
   clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；按「建立出圖模型」後下載3D零件');},140);
 }
@@ -244,9 +253,9 @@ function invalidate(){
 // Only this controller knows about the browser repository. CAD calculations
 // continue to use a complete Design object, ready for a future backend adapter.
 function syncProjectMetadata(){
-  const project=normalizeProject({name:$('project-name').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()});
+  const project=normalizeProject({name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()});
   for(const value of [result,draft])if(value?.results?.design)value.results.design.project=structuredClone(project);
-  projectMetadataValid=true;downloadButtons.forEach(id=>$(id).disabled=!result);setDraftDownloads(!draft);
+  projectMetadataValid=true;refreshExportButtons();
   return project;
 }
 function markDirty(message='有未儲存的變更'){projectDirty=true;projectMessage(message);}
@@ -256,7 +265,7 @@ function refreshProjectList(){
   select.replaceChildren(placeholder);
   for(const record of projectStore.list()){
     const option=document.createElement('option');option.value=record.id;
-    const project=record.design.project;option.textContent=`${project?.name||record.design.name}${project?.pa_model?' · '+project.pa_model:''}`;select.append(option);
+    const project=record.design.project;option.textContent=`${project?.name||record.design.name}${project?.project_id?'（'+project.project_id+'）':''}${project?.pa_model?' · '+project.pa_model:''}`;select.append(option);
   }
   select.value=activeProjectId||'';$('project-delete').disabled=!activeProjectId;
 }
@@ -265,7 +274,7 @@ function saveProject(asNew=false){
   try{
     clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
     const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;activeRecordStamp=record.updated_at;
-    $('project-name').value=design.project.name;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
+    $('project-name').value=design.project.name;$('project-id').value=design.project.project_id;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
     projectDirty=false;projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
   }catch(e){projectMessage(e.message,true);return null;}
 }
@@ -308,9 +317,9 @@ $('project-delete').addEventListener('click',()=>{
 });
 
 $('design-form').addEventListener('input',event=>{
-  if(['project-name','pa-brand','pa-model'].includes(event.target.id)){
+  if(['project-name','project-id','pa-brand','pa-model'].includes(event.target.id)){
     try{syncProjectMetadata();markDirty();}
-    catch(e){projectMetadataValid=false;downloadButtons.forEach(id=>$(id).disabled=true);setDraftDownloads(true);projectMessage(e.message,true);}
+    catch(e){projectMetadataValid=false;refreshExportButtons();projectMessage(e.message,true);}
     return;
   }
   invalidate();markDirty();
@@ -326,9 +335,9 @@ $('design-form').addEventListener('focusin',event=>{
   }
 });
 for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
-  viewer.setMode(mode);if(['copper','preform'].includes(mode)){part=mode;$('export-part').value=mode;}
+  viewer.setMode(mode);if(['copper','preform','layout'].includes(mode))selectExportPart(mode);
 });
-$('export-part').addEventListener('change',event=>part=event.target.value);
+$('export-part').addEventListener('change',event=>selectExportPart(event.target.value));
 for(const component of ['copper','preform','pcb','pa','epad'])$(`ref-${component}`).addEventListener('change',event=>viewer.setReference(component,event.target.checked));
 for(const component of ['copper','preform','pcb','pa','epad']){
  const label=$(`ref-${component}`).closest('label'),button=document.createElement('button');button.type='button';button.className='transparency-toggle';button.dataset.transparency=component;button.textContent='◐';button.setAttribute('aria-label',`${label.textContent.trim()}透明切換`);button.setAttribute('aria-pressed',String(viewer.transparent[component]));button.title='切換半透明／實體（保留零件顯示）';label.insertAdjacentElement('afterend',button);button.addEventListener('click',()=>{viewer.setTransparency(component,!viewer.transparent[component]);button.setAttribute('aria-pressed',String(viewer.transparent[component]));});
@@ -455,7 +464,7 @@ function requestModel(design) {
 
 $('design-form').addEventListener('submit',async event=>{
   event.preventDefault();if(busy)return;clearTimeout(previewTimer);error('');
-  result=null;downloadButtons.forEach(id=>$(id).disabled=true);$('viewer').dataset.ready='false';
+  result=null;refreshExportButtons();$('viewer').dataset.ready='false';
   const valid=refreshPreview(true);if(!valid)return;
   const current=revision;
   if(valid.results.trial_status==='stale'){error('設計尺寸已變更，請先解鎖舊試驗結果，再建立新試片模型。');return;}
@@ -467,16 +476,16 @@ $('design-form').addEventListener('submit',async event=>{
     try{syncProjectMetadata();}catch(e){projectMetadataValid=false;projectMessage(e.message,true);}
     viewer.setDesign(model.results,valid.layout,model.parts);renderMetrics(model.results);
     document.body.classList.add('ready');$('viewer').dataset.ready='true';$('preview-state').textContent='出圖模型已驗證';
-    downloadButtons.forEach(id=>$(id).disabled=!projectMetadataValid);status('銅塊／錫片：單一實體、體積與 STEP 回讀通過');
+    refreshExportButtons();status('銅塊／錫片：單一實體、體積與 STEP 回讀通過');
   }catch(e){if(current===revision){error(e.message);status('出圖模型建立失敗；可修正參數後重建');}}
   finally{busy=false;$('generate').disabled=false;if(rebuildQueued){rebuildQueued=false;$('design-form').requestSubmit();}}
 });
-$('download-layout').addEventListener('click',()=>{
-  clearTimeout(previewTimer);const current=refreshPreview(true);if(current)save(layoutDxf(current.results,current.layout),`${current.results.design.name}_layout_solder_mask.dxf`);
-});
-// Copper 2D drawing in the company format (drawing 348001J40001): the format
-// template is fetched once, on the first export. The cover choice is remembered.
-const COVER_KEY='pa-copper-cad.drawing-cover';
+// Output names: 專案名稱_Copper_Coin_日期 / 專案名稱_Solder_Preform_日期 /
+// 專案名稱_Coin_Solder_Masker_日期 (file-names.js).
+const fileName=(which,extension,suffix)=>outputFileName($('project-name').value,which,extension,{suffix});
+// The 2D drawings (company format of drawing 348001J40001) share one template,
+// fetched once on the first export. The cover and watermark choices are remembered.
+const COVER_KEY='pa-copper-cad.drawing-cover',WATERMARK_KEY='pa-copper-cad.drawing-watermark';
 let drawingTemplate=null;
 function loadDrawingTemplate(){
   drawingTemplate??=fetch(base+DRAWING_TEMPLATE_PATH).then(response=>{
@@ -485,45 +494,71 @@ function loadDrawingTemplate(){
   }).catch(e=>{drawingTemplate=null;throw e;});
   return drawingTemplate;
 }
-try{const stored=localStorage.getItem(COVER_KEY);if(stored!==null)$('drawing-cover').checked=stored==='1';}catch{/* storage unavailable: keep the default */}
-$('drawing-cover').addEventListener('change',event=>{try{localStorage.setItem(COVER_KEY,event.target.checked?'1':'0');}catch{/* not remembered */}});
-const drawingOptions=()=>({cover:$('drawing-cover').checked,partNo:DEFAULT_PART_NO});
-$('download-drawing').addEventListener('click',async()=>{
+const remembered=(key,checkbox)=>{try{const stored=localStorage.getItem(key);if(stored!==null)$(checkbox).checked=stored==='1';}catch{/* storage unavailable: keep the default */}
+  $(checkbox).addEventListener('change',event=>{try{localStorage.setItem(key,event.target.checked?'1':'0');}catch{/* not remembered */}});};
+remembered(COVER_KEY,'drawing-cover');remembered(WATERMARK_KEY,'drawing-watermark');
+const drawingText=(which,r,template,cover=$('drawing-cover').checked)=>(which==='preform'?preformDrawingText:copperDrawingText)(r,template,{cover});
+const drawingDxf=(which,r,template)=>encodeDxf(drawingText(which,r,template)); // Big5 bytes, as the reference
+let pdfModule=null;const loadPdf=()=>(pdfModule??=import('./dxf-pdf.js').catch(e=>{pdfModule=null;throw e;}));
+/** The watermark for PDFs when 「浮水印」 is ticked; an error when none was uploaded. */
+async function pdfWatermark(){
+  const box=$('drawing-watermark');if(!box.checked||box.disabled)return null; // disabled: nothing uploaded yet
+  const record=await watermarkStore.load();
+  if(!record)throw new Error('尚未上傳浮水印檔案：請到「設定 → 浮水印」上傳，或取消勾選「浮水印」。');
+  return (await loadPdf()).loadWatermark(record.bytes);
+}
+async function drawingPdfBytes(which,r,template,watermark){
+  const{drawingPdf}=await loadPdf(),cover=$('drawing-cover').checked;
+  return drawingPdf(drawingText(which,r,template,cover),template,{cover,watermark,appearance:watermarkStore.appearance(),title:fileName(which,'pdf').replace(/\.pdf$/,'')});
+}
+async function runExport(id,task){
+  exportsRunning.add(id);refreshExportButtons();
+  try{await task();}catch(e){error(e.message);}finally{exportsRunning.delete(id);refreshExportButtons();}
+}
+$('download-drawing').addEventListener('click',()=>runExport('download-drawing',async()=>{
   clearTimeout(previewTimer);const current=refreshPreview(true);if(!current)return;
-  $('download-drawing').disabled=true;
-  try{save(copperDrawingDxf(current.results,await loadDrawingTemplate(),drawingOptions()),`${current.results.design.name}_copper_drawing.dxf`);}
-  catch(e){error(`2D 圖面產生失敗：${e.message}`);}
-  finally{$('download-drawing').disabled=!draft;}
-});
+  try{save(drawingDxf(part,current.results,await loadDrawingTemplate()),fileName(part,'dxf'));}
+  catch(e){throw new Error(`2D 圖面產生失敗：${e.message}`);}
+}));
+$('download-drawing-pdf').addEventListener('click',()=>runExport('download-drawing-pdf',async()=>{
+  clearTimeout(previewTimer);const current=refreshPreview(true);if(!current)return;
+  try{const template=await loadDrawingTemplate(),watermark=await pdfWatermark();save(new Blob([await drawingPdfBytes(part,current.results,template,watermark)],{type:'application/pdf'}),fileName(part,'pdf'));}
+  catch(e){throw new Error(`2D 圖面 PDF 產生失敗：${e.message}`);}
+}));
 function save(data, name) {
   const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data]));
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
-$('download-step').addEventListener('click', () => { if (result) save(result.parts[part].step, `${result.results.design.name}_${part}.step`); });
-$('download-dxf').addEventListener('click', () => { if (result) save(drawing(result.results, part), `${result.results.design.name}_${part}.dxf`); });
+$('download-step').addEventListener('click', () => { if (result&&part!=='layout') save(result.parts[part].step, fileName(part,'step')); });
+$('download-dxf').addEventListener('click', () => {
+  if(part==='layout'){clearTimeout(previewTimer);const current=refreshPreview(true);if(current)save(layoutDxf(current.results,current.layout),fileName('layout','dxf'));return;}
+  if (result) save(drawing(result.results, part), fileName(part,'dxf','outline'));
+});
 const json = obj => JSON.stringify(obj, null, 2) + '\n';
-$('download-zip').addEventListener('click', async () => {
+$('download-zip').addEventListener('click', () => runExport('download-zip', async () => {
   if (!result) return;
-  const snapshot = result; $('download-zip').disabled = true;
+  const snapshot = result;
   try {
-    const r = snapshot.results, files = {};
-    files['layout_solder_mask.dxf'] = strToU8(layoutDxf(r, snapshot.layout));
-    const sheet = drawingOptions();
-    files['copper_drawing.dxf'] = copperDrawingDxf(r, await loadDrawingTemplate(), sheet); // Big5 bytes, as the reference
+    const r = snapshot.results, files = {}, template = await loadDrawingTemplate(), watermark = await pdfWatermark().catch(() => null), sheet = { cover: $('drawing-cover').checked };
+    files[fileName('layout','dxf')] = strToU8(layoutDxf(r, snapshot.layout));
+    const drawings = {};
     for (const [name, model] of Object.entries(snapshot.parts)) {
-      files[`${name}.step`] = new Uint8Array(await model.step.arrayBuffer());
-      files[`${name}.stl`] = new Uint8Array(await model.stl.arrayBuffer());
-      files[`${name}.dxf`] = strToU8(drawing(r, name));
+      files[fileName(name,'dxf')] = drawingDxf(name, r, template);
+      files[fileName(name,'pdf')] = await drawingPdfBytes(name, r, template, watermark);
+      files[fileName(name,'step')] = new Uint8Array(await model.step.arrayBuffer());
+      files[fileName(name,'stl')] = new Uint8Array(await model.stl.arrayBuffer());
+      files[fileName(name,'dxf','outline')] = strToU8(drawing(r, name));
+      const number = titleBlockPartNumber(r.design, name), view = name === 'preform' ? preformDrawingLayout(r) : drawingLayout(r);
+      drawings[name] = { dxf: fileName(name,'dxf'), pdf: fileName(name,'pdf'), part_no: number.partNo, rev: number.rev, part_number: number.full || null, view_scale: view.label, ...(name === 'copper' ? { detail_scale: view.detail.label } : { drawn_thickness: drawnThickness(r) }) };
     }
-    const report = { schema_version: 2, created_at_utc: new Date().toISOString(), engine: 'OpenCascade WebAssembly / Replicad', units: { length: 'mm', area: 'mm2', volume: 'mm3' },
+    const report = { schema_version: 3, created_at_utc: new Date().toISOString(), engine: 'OpenCascade WebAssembly / Replicad', units: { length: 'mm', area: 'mm2', volume: 'mm3' },
       parameters: r.design, results: r, verification: snapshot.verification,
       cad_volumes_mm3: Object.fromEntries(Object.entries(snapshot.parts).map(([key, v]) => [key, v.volume])),
       native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
     report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange and six pins follow illustrative datasheet proportions; SPH fixes the lead reference plane. Only PA length, width, tolerance and SPH affect manufacturing calculations.' };
-    report.layout = layoutReport(snapshot.layout, r);
-    const view = drawingLayout(r);
-    report.drawing = { file: 'copper_drawing.dxf', format: 'Delta drawing format of 348001J40001 (DXF R2000)', cover_sheet: sheet.cover, sheets: sheet.cover ? 2 : 1, revision: '00', part_no: sheet.partNo, view_scale: view.label, detail_scale: view.detail.label };
+    report.layout = { file: fileName('layout','dxf'), ...layoutReport(snapshot.layout, r) };
+    report.drawings = { format: 'Delta drawing format of 348001J40001 (DXF R2000, PDF A4)', cover_sheet: sheet.cover, sheets: sheet.cover ? 2 : 1, watermark: watermark ? 'behind page content' : 'none', ...drawings };
     files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));
     for (const path of ['creo_runner.py', 'WINDOWS_CREO7.md', 'THIRD_PARTY_LICENSES.txt']) {
@@ -534,10 +569,87 @@ $('download-zip').addEventListener('click', async () => {
     const hashes = {};
     for (const [name, bytes] of Object.entries(files)) hashes[name] = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), v => v.toString(16).padStart(2, '0')).join('');
     files['sha256.json'] = strToU8(json(hashes));
-    save(zipSync(files, { level: 6 }), `${r.design.name}.zip`);
-  } catch (e) { error(`打包失敗：${e.message}`); }
-  finally { $('download-zip').disabled = !result||!projectMetadataValid; }
+    save(zipSync(files, { level: 6 }), fileName('bundle','zip'));
+  } catch (e) { throw new Error(`打包失敗：${e.message}`); }
+}));
+
+// ───── part numbers (料號): 10-character base + REV, per drawn part, lockable ─────
+$('part-rev').replaceChildren(...REVISIONS.map(rev=>{const option=document.createElement('option');option.value=rev;option.textContent=`REV ${rev}`;return option;}));
+function selectExportPart(value){
+  part=value;$('export-part').value=value;renderPartNumber();refreshExportButtons();
+}
+function renderPartNumber(){
+  const drawn=part!=='layout',group=$('part-number-group');group.hidden=!drawn;
+  for(const id of ['drawing-cover','drawing-watermark'])$(id).closest('label').classList.toggle('inactive',!drawn);
+  if(!drawn)return;
+  const entry=partNumbers[part],input=$('part-no'),complete=entry.part_no.length===PART_NO_BASE_LENGTH;
+  $('part-no-label').textContent=`${PART_LABELS[part]}料號`;
+  if(input.value!==entry.part_no)input.value=entry.part_no;
+  input.readOnly=entry.locked;input.setAttribute('aria-readonly',String(entry.locked));$('part-rev').value=entry.rev;$('part-rev').disabled=entry.locked;
+  $('part-lock').textContent=entry.locked?'🔒':'🔓';$('part-lock').setAttribute('aria-pressed',String(entry.locked));
+  $('part-lock').disabled=!entry.locked&&!complete;
+  $('part-lock').title=entry.locked?'解鎖後可修改料號':complete?'鎖定料號（隨專案儲存）':'填滿前 10 碼後可鎖定';
+  const full=fullPartNumber(entry),out=$('part-no-full');
+  out.textContent=full?`= ${full}`:entry.part_no?`${entry.part_no.length}/10`:'';
+  out.title=full?`料號 ${full}：PART NO. ${entry.part_no}，REV ${entry.rev}`:'料號共 12 碼＝前 10 碼＋REV 2 碼；空白時圖面顯示 XXXXXXXXXX';
+  group.dataset.state=entry.locked?'locked':full?'complete':entry.part_no?'partial':'empty';
+}
+function partNumberChanged(message){
+  for(const value of [result,draft])if(value?.results?.design)value.results.design.part_numbers=structuredClone(partNumbers);
+  renderPartNumber();markDirty(message);
+}
+$('part-no').addEventListener('input',event=>{
+  const entry=partNumbers[part];if(entry.locked||part==='layout')return;
+  // A pasted full 12-character number fills the 10-character base and the REV.
+  const all=event.target.value.toUpperCase().replace(/[^0-9A-Z]/g,''),full=all.length===PART_NO_BASE_LENGTH+2&&REVISIONS.includes(all.slice(-2));
+  const clean=full?all.slice(0,PART_NO_BASE_LENGTH):cleanPartNo(all);if(event.target.value!==clean)event.target.value=clean;
+  entry.part_no=clean;if(full)entry.rev=all.slice(-2);partNumberChanged();
 });
+$('part-rev').addEventListener('change',event=>{const entry=partNumbers[part];if(entry.locked||part==='layout')return;entry.rev=event.target.value;partNumberChanged();});
+// Locking writes to storage at once only when it is the sole change to a saved project.
+$('part-lock').addEventListener('click',()=>{
+  if(part==='layout')return;
+  const entry=partNumbers[part],wasDirty=projectDirty;
+  if(!entry.locked&&entry.part_no.length!==PART_NO_BASE_LENGTH)return;
+  entry.locked=!entry.locked;
+  const action=`${PART_LABELS[part]}料號已${entry.locked?'鎖定':'解鎖'}`;
+  if(activeProjectId&&!wasDirty){partNumberChanged();if(saveProject())projectMessage(`${action}並儲存`);}
+  else partNumberChanged(`${action}，尚未儲存；請按「儲存」${activeProjectId?'':'建立專案'}保存`);
+});
+
+// ───── watermark (設定 → 浮水印) ─────
+const watermarkStore=new WatermarkStore({sp:spSync});
+async function renderWatermark(){
+  const record=await watermarkStore.cached(),appearance=watermarkStore.appearance();
+  $('settings-wm-file').textContent=record?`${record.name}（${record.kind.toUpperCase()}，${(record.size/1024).toFixed(0)} KB，${new Date(record.updated_at).toLocaleString('zh-TW',{hour12:false})}）`:'尚未上傳';
+  const places=['此瀏覽器'];if(watermarkStore.folderName())places.push(`本機 ${watermarkStore.folderName()}/Watermark`);if(spSync.isEnabled())places.push('SharePoint PA_Copper_CAD/Watermark');
+  $('settings-wm-location').textContent=places.join('、');
+  $('settings-wm-folder').textContent=watermarkStore.folderName()??'未設定';
+  for(const[key,id]of [['scale','wm-scale'],['opacity','wm-opacity'],['rotation','wm-rotation']])if(document.activeElement!==$(id))$(id).value=appearance[key];
+  $('wm-remove').disabled=!record;
+  const box=$('drawing-watermark');box.disabled=!record;box.closest('label').title=record?'2D 圖面 PDF 打上浮水印（置於圖面內容之下）':'尚未上傳浮水印：設定 → 浮水印';
+  box.closest('label').classList.toggle('unavailable',!record);
+}
+const wmMessage=(text,failed=false)=>{const out=$('settings-wm-message');out.textContent=text;out.classList.toggle('save-error',failed);};
+$('wm-upload').addEventListener('click',()=>$('wm-file').click());
+$('wm-file').addEventListener('change',async event=>{
+  const file=event.target.files?.[0];event.target.value='';if(!file)return;
+  wmMessage('上傳中…');
+  try{const{saved,notes}=await watermarkStore.upload(file);wmMessage(`已儲存到：${saved.join('、')}${notes.length?`｜${notes.join('；')}`:''}`,notes.length>0);$('drawing-watermark').checked=true;}
+  catch(e){wmMessage(e.message,true);}
+  renderWatermark();
+});
+$('wm-folder').addEventListener('click',async()=>{const r=await watermarkStore.pickFolder();if(r.ok){const record=await watermarkStore.cached();if(record){const{saved,notes}=await watermarkStore.store(record);wmMessage(`已寫入：${saved.join('、')}${notes.length?`｜${notes.join('；')}`:''}`,notes.length>0);}else{const got=await watermarkStore.refresh();wmMessage(got.record?'已從本機資料夾讀取浮水印':'已設定本機資料夾');}}else if(r.reason!=='cancelled')wmMessage(r.message||'無法開啟資料夾',true);$('wm-folder-reconnect').hidden=true;renderWatermark();});
+$('wm-folder-reconnect').addEventListener('click',async()=>{const r=await watermarkStore.reconnectFolder();$('wm-folder-reconnect').hidden=r.ok;if(r.ok)await watermarkStore.refresh();renderWatermark();});
+$('wm-refresh').addEventListener('click',async()=>{wmMessage('讀取中…');try{const{record,found}=await watermarkStore.refresh({interactive:spSync.isEnabled()});wmMessage(record?`目前使用 ${record.name}${found.length?`（已比對 ${found.map(v=>v==='local'?'本機資料夾':'SharePoint').join('、')}）`:''}`:'資料夾中沒有浮水印檔案');}catch(e){wmMessage(e.message,true);}renderWatermark();});
+$('wm-remove').addEventListener('click',async()=>{const{notes}=await watermarkStore.remove();wmMessage(notes.length?`已移除（${notes.join('；')}）`:'已移除浮水印檔案',notes.length>0);renderWatermark();});
+const appearanceInputs=['wm-scale','wm-opacity','wm-rotation'];
+for(const id of appearanceInputs)$(id).addEventListener('change',async()=>{const appearance=await watermarkStore.saveAppearance({scale:$('wm-scale').value,opacity:$('wm-opacity').value,rotation:$('wm-rotation').value});wmMessage(`外觀：相對頁面 ${appearance.scale}%、不透明度 ${appearance.opacity}%、旋轉 ${appearance.rotation}°`);renderWatermark();});
+$('wm-defaults').addEventListener('click',async()=>{const appearance=await watermarkStore.saveAppearance({});wmMessage(`已恢復預設：相對頁面 ${appearance.scale}%、不透明度 ${appearance.opacity}%、旋轉 ${appearance.rotation}°`);renderWatermark();});
+$('settings-open').addEventListener('click',renderWatermark);
+(async()=>{const folder=await watermarkStore.tryRestoreFolder();$('wm-folder-reconnect').hidden=!folder.needsPermission;if(folder.needsPermission)$('settings-wm-folder').textContent=`${folder.name}（需要重新授權）`;await renderWatermark();
+  // A newer watermark in the Watermark folders (another computer uploaded one) replaces this browser's copy.
+  watermarkStore.refresh({interactive:false}).then(renderWatermark,()=>{});})();
 
 
 initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');storageUI.start();
