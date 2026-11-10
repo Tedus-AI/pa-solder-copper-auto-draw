@@ -19,9 +19,10 @@
 import { getTolerance } from './tolerances.js';
 import { holeCorners, defaultHoleCorners } from './hole-corners.js';
 import { copperFootprint } from './copper-geometry.js';
+import { PART_NO_PLACEHOLDER, titleBlockPartNumber } from './part-numbers.js';
 
 export const DRAWING_TEMPLATE_PATH = 'drawing/copper-drawing-template.json';
-export const DEFAULT_PART_NO = '348XXXXXXX';
+export const DEFAULT_PART_NO = PART_NO_PLACEHOLDER.copper;
 
 const OUTLINE = 'COIN_DXF_CONTINUOUS_LINE',
   AXIS = 'COIN_DXF_AXIS',
@@ -55,6 +56,9 @@ const MAIN_CENTER = [62.354, 57.882]; // the reference's main view centre
 const NOTE_X = 104.68,
   NOTE_TOP = 65.32,
   NOTE_LINE = 2.7;
+/** Shared with the preform drawing (same format, title block and notes position). */
+export const DRAWING_LAYERS = { OUTLINE, AXIS, DIM, TXT };
+export const DRAWING_SHEET = { AREA, NOTE_X, NOTE_TOP, NOTE_LINE, SHEET_SCALE, TH };
 // The reference's notes, word for word, wrapped to fill the space between the
 // views and the frame (approved layout; the wording must not change).
 export const DRAWING_NOTES = [
@@ -87,7 +91,7 @@ export const drawingNumber = v => {
   const s = (Math.abs(v) < 5e-4 ? 0 : v).toFixed(3);
   return s.endsWith('0') ? s.slice(0, -1) : s;
 };
-const general = v => String(Number(v.toPrecision(6)));
+export const general = v => String(Number(v.toPrecision(6)));
 const glyphs = s => s.replaceAll('%%p', '±').replaceAll('%%c', 'Ø').length;
 
 /** Tolerance of `key` as drawn: symmetric ±, stacked deviations, or none (general tolerance). */
@@ -154,7 +158,7 @@ const real = v => {
   return s.endsWith('.') ? `${s}0` : s;
 };
 
-function templateWriter(template) {
+export function templateWriter(template) {
   if (template?.format !== 'pa-copper-drawing-template' || template.version !== 1 || template.dxf_version !== 'AC1015')
     throw new Error('圖面範本格式不正確，請重新整理網站。');
   let next = template.next_handle;
@@ -521,47 +525,12 @@ export function drawingLayout(r) {
   throw new Error('銅塊尺寸超出 A4 圖面可排版範圍（最小比例 1:5）。');
 }
 
-// ───────── the drawing ─────────
 /**
- * The copper base drawing as DXF R2000 bytes (code page ANSI_950, as the reference).
- * @param r calculate() result
- * @param template parsed copper-drawing-template.json
- * @param options cover: include the cover sheet (SHEET 1 OF 2, drawing 2 OF 2);
- *   date: drawing date; partNo: PART NO (348XXXXXXX until assigned)
+ * Dimension tools on a template writer, as on the reference: labels with symmetric or
+ * stacked tolerances, filled arrows, and linear DIMENSION entities whose blocks hold
+ * the drawn extension lines, dimension line, arrows and text.
  */
-export function copperDrawingDxf(r, template, { cover = true, date = new Date(), partNo = DEFAULT_PART_NO } = {}) {
-  const d = r.design,
-    c = d.copper;
-  const w = templateWriter(template),
-    msp = w.model;
-  const lay = drawingLayout(r),
-    s = lay.scale,
-    exact = Math.abs(s - 1) < 1e-9; // 3:2: the sheet measures the part, so "<>" shows the value
-  const [CX, CY] = lay.center;
-  const E = c.base_length,
-    F = c.base_width,
-    G = c.base_thickness,
-    R = c.corner_radius,
-    Dh = c.hole_diameter,
-    Ch = c.hole_edge_offset;
-  const I = r.boss_length,
-    H = r.boss_width,
-    J = c.pad_size,
-    K = d.stack.pad_height,
-    L = r.boss_total_height,
-    low = r.boss_lower_height;
-  const [bx, by] = r.boss_center ?? [0, 0];
-  const left = CX - (E * s) / 2,
-    right = CX + (E * s) / 2,
-    bottom = CY - (F * s) / 2,
-    top = CY + (F * s) / 2;
-  const bl = CX + (bx - I / 2) * s,
-    br = CX + (bx + I / 2) * s,
-    bb = CY + (by - H / 2) * s,
-    bt = CY + (by + H / 2) * s;
-  const Rs = R * s,
-    Js = J * s;
-
+export function drawingTools(w, d, exact) {
   const parts = (key, value, prefix) => {
     const t = drawingTolerance(d, key),
       main = `${prefix}${drawingNumber(value)}`;
@@ -630,6 +599,85 @@ export function copperDrawingDxf(r, template, { cover = true, date = new Date(),
     else putLabel(block, label, [t0, at], [1, 0], [0, 1], 0, end);
   };
 
+  return { parts, putLabel, arrow, override, linear };
+}
+
+/**
+ * Title block values and the finished DXF text (before the ANSI_950 encoding). The
+ * drawing sheet is SHEET 2 OF 2 after the cover, else 1 OF 1.
+ */
+export function finishSheet(w, template, d, { cover, date, partNo, rev, description }) {
+  const y = date.getFullYear(),
+    m = date.getMonth() + 1,
+    day = date.getDate(),
+    two = v => String(v).padStart(2, '0');
+  const sheet = template.sheet_box,
+    cov = template.cover_box;
+  const extents = cover ? [cov[0], 0, sheet[2], Math.max(cov[3], sheet[3])] : sheet;
+  const aspect = 2.19; // the reference's initial view (wide screen)
+  return w.toString({
+    cover,
+    extents,
+    viewHeight: Math.max(extents[3] - extents[1], (extents[2] - extents[0]) / aspect) * 1.08,
+    placeholders: {
+      DATE: `${y}/${m}/${day}`,
+      DATE_PADDED: `${y}/${two(m)}/${two(day)}`,
+      USED_ON: d.project?.name ?? '',
+      PART_NO: partNo,
+      REV: rev,
+      DESCRIPTION: description,
+      SHEET: cover ? '2' : '1',
+      SHEETS: cover ? '2' : '1',
+    },
+  });
+}
+
+// ───────── the drawing ─────────
+/**
+ * The copper base drawing as DXF text (Unicode; see copperDrawingDxf for the file bytes).
+ * @param r calculate() result
+ * @param template parsed copper-drawing-template.json
+ * @param options cover: include the cover sheet (SHEET 1 OF 2, drawing 2 OF 2);
+ *   date: drawing date; partNo / rev: override the design's part number
+ *   (part_numbers.copper: 10-character base under PART NO., 2-digit REV)
+ */
+export function copperDrawingText(r, template, { cover = true, date = new Date(), partNo, rev } = {}) {
+  const d = r.design,
+    c = d.copper;
+  const number = { ...titleBlockPartNumber(d, 'copper') };
+  if (partNo !== undefined) number.partNo = partNo;
+  if (rev !== undefined) number.rev = rev;
+  const w = templateWriter(template),
+    msp = w.model;
+  const lay = drawingLayout(r),
+    s = lay.scale,
+    exact = Math.abs(s - 1) < 1e-9; // 3:2: the sheet measures the part, so "<>" shows the value
+  const [CX, CY] = lay.center;
+  const E = c.base_length,
+    F = c.base_width,
+    G = c.base_thickness,
+    R = c.corner_radius,
+    Dh = c.hole_diameter,
+    Ch = c.hole_edge_offset;
+  const I = r.boss_length,
+    H = r.boss_width,
+    J = c.pad_size,
+    K = d.stack.pad_height,
+    L = r.boss_total_height,
+    low = r.boss_lower_height;
+  const [bx, by] = r.boss_center ?? [0, 0];
+  const left = CX - (E * s) / 2,
+    right = CX + (E * s) / 2,
+    bottom = CY - (F * s) / 2,
+    top = CY + (F * s) / 2;
+  const bl = CX + (bx - I / 2) * s,
+    br = CX + (bx + I / 2) * s,
+    bb = CY + (by - H / 2) * s,
+    bt = CY + (by + H / 2) * s;
+  const Rs = R * s,
+    Js = J * s;
+
+  const { parts, putLabel, arrow, linear } = drawingTools(w, d, exact);
   // ── main view: top view, boss toward the viewer ──
   const footprint = copperFootprint(c);
   const holes = footprint.centers.map(([x, y]) => [CX + x * s, CY + y * s]);
@@ -1026,28 +1074,14 @@ export function copperDrawingDxf(r, template, { cover = true, date = new Date(),
   // ── notes ──
   DRAWING_NOTES.forEach((line, i) => w.text(msp, line, [NOTE_X, NOTE_TOP - i * NOTE_LINE]));
 
-  const y = date.getFullYear(),
-    m = date.getMonth() + 1,
-    day = date.getDate(),
-    two = v => String(v).padStart(2, '0');
-  const sheet = template.sheet_box,
-    cov = template.cover_box;
-  const extents = cover ? [cov[0], 0, sheet[2], Math.max(cov[3], sheet[3])] : sheet;
-  const aspect = 2.19; // the reference's initial view (wide screen)
-  return encodeDxf(
-    w.toString({
-      cover,
-      extents,
-      viewHeight: Math.max(extents[3] - extents[1], (extents[2] - extents[0]) / aspect) * 1.08,
-      placeholders: {
-        DATE: `${y}/${m}/${day}`,
-        DATE_PADDED: `${y}/${two(m)}/${two(day)}`,
-        USED_ON: d.project?.name ?? '',
-        PART_NO: partNo,
-        DESCRIPTION: `Cu base ${general(E)}*${general(F)}*${general(G + L)}`,
-        SHEET: cover ? '2' : '1',
-        SHEETS: cover ? '2' : '1',
-      },
-    }),
-  );
+  return finishSheet(w, template, d, {
+    cover,
+    date,
+    partNo: number.partNo,
+    rev: number.rev,
+    description: `Cu base ${general(E)}*${general(F)}*${general(G + L)}`,
+  });
 }
+
+/** The copper base drawing as DXF R2000 bytes (code page ANSI_950, as the reference). */
+export const copperDrawingDxf = (r, template, options) => encodeDxf(copperDrawingText(r, template, options));

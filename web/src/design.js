@@ -2,10 +2,11 @@ import { defaultTolerances, toleranceDefaults, getTolerance, dimensionRange } fr
 import { chamferFor, TRIAL_DELTA, trialChoices, emptyTrial, trialState } from './preform-rules.js';
 import { holeCorners, holeMask } from './hole-corners.js';
 import { copperFootprint, roundedBaseDistance } from './copper-geometry.js';
+import { emptyPartNumbers, normalizePartNumbers } from './part-numbers.js';
 
 export const defaults = {
   name: 'pa_780_m1p',
-  project: { name: '未命名專案', pa_brand: '', pa_model: 'H-37248KC-6/2' },
+  project: { name: '未命名專案', project_id: '', pa_brand: '', pa_model: 'H-37248KC-6/2' },
   package: { length: 20.57, width: 9.78, max_tolerance: 0.127, support_height: 1.57 },
   pcb: {
     opening_length: 20.9,
@@ -39,6 +40,8 @@ export const defaults = {
   layout: { border_width: 1, epad_size: 1.5, web_width: 0.3, hole_clearance: 4 },
   tolerances: defaultTolerances(),
   trial_result: emptyTrial(),
+  // 12-character part numbers (10-character base + 2-digit REV) of the drawn parts.
+  part_numbers: emptyPartNumbers(),
 };
 export const fields = {
   package: ['PA 封裝', { length: 'PA 長度', width: 'PA 寬度', support_height: '支撐高度 SPH' }],
@@ -141,8 +144,9 @@ export function reliefArea(b) {
   return 2 * Math.PI * r * r - lens;
 }
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
-// Project metadata only (display name, PA brand and model); independent of geometry.
-const PROJECT_LABELS = { name: '專案名稱', pa_brand: 'PA 品牌', pa_model: 'PA 型號' };
+// Project metadata only (display name, project ID, PA brand and model); independent of geometry.
+// project_id belongs to this tool only; it is never read from or written to AI-Thermal.
+const PROJECT_LABELS = { name: '專案名稱', project_id: '專案ID', pa_brand: 'PA 品牌', pa_model: 'PA 型號' };
 export function normalizeProject(project) {
   const result = structuredClone(defaults.project);
   check(project && typeof project === 'object' && !Array.isArray(project), '專案資料須為設定物件。');
@@ -212,6 +216,11 @@ export function normalize(input) {
     ['base_length', 'base_width'].every(k => Object.hasOwn(input.copper ?? {}, k)),
     '銅塊基座 E/F 須由 thermal／RF 設計明確提供，不自動套用 40 × 30 示範值。',
   );
+  try {
+    d.part_numbers = normalizePartNumbers(input.part_numbers);
+  } catch (error) {
+    check(false, error.message);
+  }
   const record = input.trial_result ?? emptyTrial();
   check(
     record &&

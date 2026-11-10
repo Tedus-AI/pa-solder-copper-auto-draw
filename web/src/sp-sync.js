@@ -6,6 +6,7 @@
 //
 //   PA_Copper_CAD/Database/projects/<projectId>.json   one file per saved project
 //   PA_Copper_CAD/Backup/pa_copper_cad_backup_YYYY-MM-DD.json   whole database, newest 2
+//   PA_Copper_CAD/Watermark/<file> + watermark.json      drawing PDF watermark (watermark-store.js)
 //   ToolDatabase/thermal_db.json                         read only: AI-Thermal's projects
 //
 // Folders are created by the first upload. The local working copy (project-db.js)
@@ -319,6 +320,22 @@ export class SharePointSync {
       headers: ifMatch ? { 'If-Match': ifMatch } : {},
       ok: s => s === 404,
     });
+  }
+
+  /** Upload a file's bytes (Graph simple upload, up to 4 MB), e.g. the watermark. */
+  async uploadBytes(path, bytes, contentType = 'application/octet-stream') {
+    const res = await this.graph(`${this.byPath(path)}:/content`, {
+      method: 'PUT',
+      body: bytes,
+      headers: { 'Content-Type': contentType },
+    });
+    return metaOf(await res.json().catch(() => ({})));
+  }
+  /** Download a file's bytes; null when it does not exist. */
+  async downloadBytes(path) {
+    const res = await this.graph(`${this.byPath(path)}:/content`, { ok: s => s === 404 });
+    if (res.status === 404) return null;
+    return { bytes: new Uint8Array(await res.arrayBuffer()) };
   }
 
   // ───────── sync run ─────────

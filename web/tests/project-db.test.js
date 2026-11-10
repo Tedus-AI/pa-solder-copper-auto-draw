@@ -195,9 +195,12 @@ test('SharePoint bookkeeping: an edit during upload stays pending, deletes are p
 test('project metadata validates on its own, without a full design', () => {
   assert.deepEqual(normalizeProject({ name: '  RRU PA  ', pa_brand: ' NXP ', pa_model: 'X1' }), {
     name: 'RRU PA',
+    project_id: '',
     pa_brand: 'NXP',
     pa_model: 'X1',
   });
+  // the project ID belongs to this tool; older records without it read as empty
+  assert.equal(normalizeProject({ name: 'RRU', project_id: ' PA-2026-01 ' }).project_id, 'PA-2026-01');
   assert.throws(() => normalizeProject({ name: '' }), /專案名稱/);
   assert.throws(() => normalizeProject({ name: 'a\nb' }), /單行/);
 });

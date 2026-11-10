@@ -10,9 +10,9 @@
 
 網頁原始碼在 `web/`，部署與測試方式見 [DEPLOYMENT.md](DEPLOYMENT.md)。以下保留原始 Python CLI 使用說明。
 
-桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、銅塊／錫片／PCB／PA／E-PAD顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。銅塊 2D 圖面依公司圖面 348001J40001 的格式出圖（可選含封面），尺寸公差跟隨工具設定。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
+桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、銅塊／錫片／PCB／PA／E-PAD顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。銅塊與錫片 2D 圖面依公司圖面 348001J40001 的格式出圖（可選含封面），尺寸公差跟隨工具設定；各自有 12 碼料號（前 10 碼對應 PART NO.、後 2 碼對應 REV，可上鎖），並可輸出 2D 圖面 PDF，可選擇套用設定中上傳的浮水印（比照 Acrobat，置於圖面內容之下；浮水印檔另存於資料庫的 Watermark 資料夾）。出圖零件下拉含 E-PAD（Layout 綠漆 DXF）。輸出檔名統一為 專案名稱_Copper_Coin_日期／專案名稱_Solder_Preform_日期／專案名稱_Coin_Solder_Masker_日期。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
 
-專案名稱、PA 品牌與 PA 型號同排顯示；專案名稱可從 AI-Thermal 工具的專案清單下拉選擇（只讀）。專案可儲存、另存、載入與刪除，資料庫比照 Thermal-Test-Report-Builder：頁首的 ⚙ 設定可選擇本機資料庫檔（可放共用磁碟）與每日自動備份資料夾，並可開啟 SharePoint 雙存檔（Thermal-Spec-DB／文件／PA_Copper_CAD）；頁首左右並排顯示 SharePoint 與本機的寫入狀態。尺寸欄的 Typ. 表示未加公差的設計尺寸。
+專案名稱、專案ID（本工具專用）、PA 品牌與 PA 型號同排顯示；專案名稱可從 AI-Thermal 工具的專案清單下拉選擇（只讀）。專案可儲存、另存、載入與刪除，資料庫比照 Thermal-Test-Report-Builder：頁首的 ⚙ 設定可選擇本機資料庫檔（可放共用磁碟）與每日自動備份資料夾，並可開啟 SharePoint 雙存檔（Thermal-Spec-DB／文件／PA_Copper_CAD）；頁首左右並排顯示 SharePoint 與本機的寫入狀態。尺寸欄的 Typ. 表示未加公差的設計尺寸。
 
 新增「錫厚圖解／計算表」：以目前尺寸逐步呈現容腔減銅凸台、削角後面積與錫厚。容腔的避空面積 Aₒ 採 PCB 開孔實際的四個外側半圓（2πr²，同側重疊時扣除），不再沿用 PDF 第12／13頁只計一個整圓 π(O/2)² 的等效式；預設案例 Z 由 0.3748 改為 0.3859 mm。HSK 說明明列對應位置挖槽、槽深 G＋0.05 mm 與加工公差 ±0.05 mm。
 

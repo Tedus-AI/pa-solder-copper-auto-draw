@@ -70,7 +70,7 @@ def test_project_display_metadata_roundtrips_without_changing_design_geometry(da
     data["project"] = {"name": "  基地台 PA 專案 / A  ", "pa_model": '  H-37248KC-6/2 "Rev A"  '}
     updated = Design.from_mapping(data)
     assert updated.name == original.name
-    assert updated.to_mapping()["project"] == {"name": "基地台 PA 專案 / A", "pa_model": 'H-37248KC-6/2 "Rev A"', "pa_brand": ""}
+    assert updated.to_mapping()["project"] == {"name": "基地台 PA 專案 / A", "pa_model": 'H-37248KC-6/2 "Rev A"', "pa_brand": "", "project_id": ""}
     assert calculate(updated) == original_result
     assert Design.from_mapping(updated.to_mapping()) == updated
     data["project"]["pa_model"] = " "
@@ -239,6 +239,11 @@ def _parity_cases(data):
     c = deepcopy(data); c["tolerances"] = {"pcb.unknown": {"minus": 0, "plus": 0}}; cases["unknown_tolerance_rejected"] = c
     c = deepcopy(data); c["copper"]["hole_diameter"] = 15; cases["hole_too_large_rejected"] = c
     c = deepcopy(data); del c["copper"]["base_width"]; cases["missing_base_rejected"] = c
+    c = deepcopy(data); c["project"] = {"name": "RRU", "project_id": " PJ-2026-001 "}
+    c["part_numbers"] = {"copper": {"part_no": "348001j400", "rev": "01", "locked": True}}; cases["project_id_and_part_numbers"] = c
+    c = deepcopy(data); c["part_numbers"] = {"copper": {"part_no": "348-001"}}; cases["bad_part_number_rejected"] = c
+    c = deepcopy(data); c["part_numbers"] = {"preform": {"part_no": "348001", "locked": True}}; cases["partial_locked_part_number_rejected"] = c
+    c = deepcopy(data); c["part_numbers"] = {"copper": {"rev": "100"}}; cases["bad_revision_rejected"] = c
     return cases
 
 
@@ -301,3 +306,16 @@ def test_locked_trial_requires_iso_timestamp(data):
         Design.from_mapping(data)
     data["trial_result"]["confirmed_at"] = "2026-11-08T09:30:00+08:00"
     assert calculate(Design.from_mapping(data)).trial_status == "locked"
+
+
+def test_part_numbers_and_project_id_are_metadata_only(data):
+    """The 12-character part numbers (10 + REV) and the tool's project ID never change geometry."""
+    plain = calculate(Design.from_mapping(deepcopy(data)))
+    data["project"] = {"name": "RRU", "project_id": "PJ-1"}
+    data["part_numbers"] = {"copper": {"part_no": "348001j400", "rev": "02", "locked": True}}
+    d = Design.from_mapping(data)
+    assert d.project.project_id == "PJ-1"
+    assert d.part_numbers["copper"] == {"part_no": "348001J400", "rev": "02", "locked": False} | {"locked": True}
+    assert d.part_numbers["preform"] == {"part_no": "", "rev": "00", "locked": False}
+    assert calculate(d).trial_signature == plain.trial_signature
+    assert Design.from_mapping(d.to_mapping()).part_numbers == d.part_numbers

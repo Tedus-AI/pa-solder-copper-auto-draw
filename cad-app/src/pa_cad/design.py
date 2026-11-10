@@ -107,7 +107,37 @@ class Project:
     """Display metadata; independent of the safe CAD file name and geometry."""
     name: str = "未命名專案"
     pa_model: str = "H-37248KC-6/2"
-    pa_brand: str = ""  # last, so positional Project(name, pa_model) keeps working
+    pa_brand: str = ""  # after pa_model, so positional Project(name, pa_model) keeps working
+    project_id: str = ""  # this tool's own project ID; never linked to other tools
+
+
+REVISIONS = tuple(f"{i:02d}" for i in range(100))
+
+
+def empty_part_numbers() -> dict:
+    """Copper / preform part numbers: 10-character base + 2-digit REV (web/src/part-numbers.js)."""
+    return {part: {"part_no": "", "rev": "00", "locked": False} for part in ("copper", "preform")}
+
+
+def normalize_part_numbers(source) -> dict:
+    out = empty_part_numbers()
+    if source is None:
+        return out
+    if not isinstance(source, dict) or set(source) - set(out):
+        raise ValueError("料號資料格式無效")
+    for part, value in source.items():
+        if not isinstance(value, dict) or set(value) - set(out[part]):
+            raise ValueError(f"{part} 料號格式無效")
+        entry = {**out[part], **value}
+        if not isinstance(entry["part_no"], str) or not re.fullmatch(r"[0-9A-Za-z]{0,10}", entry["part_no"].strip()):
+            raise ValueError(f"{part} 料號前 10 碼只能使用英文字母與數字")
+        entry["part_no"] = entry["part_no"].strip().upper()
+        if entry["rev"] not in REVISIONS:
+            raise ValueError(f"{part} 料號 REV 須為 00～99")
+        if not isinstance(entry["locked"], bool) or (entry["locked"] and len(entry["part_no"]) != 10):
+            raise ValueError(f"{part} 料號鎖定狀態無效")
+        out[part] = entry
+    return out
 
 
 @dataclass(frozen=True)
@@ -123,6 +153,7 @@ class Design:
     tolerances: dict = field(default_factory=dict)
     project: Project = field(default_factory=Project)
     trial_result: dict = field(default_factory=lambda: {"choice":"middle", "locked":False, "value":None, "signature":None, "confirmed_at":None})
+    part_numbers: dict = field(default_factory=empty_part_numbers)
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -139,7 +170,7 @@ class Design:
         project_data = data.get("project", {})
         if not isinstance(project_data, dict):
             raise ValueError("project 必須是 mapping")
-        if unknown := set(project_data)-{"name", "pa_brand", "pa_model"}:
+        if unknown := set(project_data)-{"name", "project_id", "pa_brand", "pa_model"}:
             raise ValueError(f"未知專案欄位: {sorted(unknown)}")
         project_values = asdict(Project())
         for key, value in project_data.items():
@@ -227,7 +258,9 @@ class Design:
                     raise ValueError(f"{key} 公差須為有限非負數值")
             if "source" in pair and not isinstance(pair["source"], str):
                 raise ValueError(f"{key} 公差來源須為文字")
-        design = cls(data["name"], **groups, tolerances=normalized, project=project, trial_result=trial)
+        part_numbers = normalize_part_numbers(data.get("part_numbers"))
+        design = cls(data["name"], **groups, tolerances=normalized, project=project, trial_result=trial,
+                     part_numbers=part_numbers)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
