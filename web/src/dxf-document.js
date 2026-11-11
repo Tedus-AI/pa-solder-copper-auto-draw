@@ -191,8 +191,9 @@ export function dxfDocument({ ltypes = [], layers = [] } = {}) {
         1000,
         73,
         1,
+        // UCSICON off: no X/Y coordinate icon at the origin (the PA centre in the Layout DXF)
         74,
-        3,
+        0,
         75,
         0,
         76,

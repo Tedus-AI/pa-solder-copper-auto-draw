@@ -75,7 +75,7 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')hideFormula(
 
 $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 // Compact visible labels retain the full quantity name in their formula help.
-for(const[id,label]of [['metric-z','計算 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
+for(const[id,label]of [['metric-z','錫片厚度 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
 const toleranceLegend=$('tolerance-status').parentElement.querySelector('small');toleranceLegend.title=toleranceLegend.textContent;toleranceLegend.textContent='−／＋偏差；* 原資料未指定，空白暫按 0';
 document.querySelector('.tolerance-toolbar').title=toleranceLegend.title;
 
@@ -426,7 +426,7 @@ Y四捨五入到小數第二位，實際間隙 = ${f(r.corner_clearance)} mm。`
   const boss=`V₂ = I × H × (L − K) + 4 × J² × K\n= ${f(r.boss_length)} × ${f(r.boss_width)} × ${f(r.boss_lower_height)} + 4 × ${f(c.pad_size)}² × ${f(s.pad_height)} = ${f(r.boss_volume)} mm³。`;
   const volume=`V₁ = V₁₋₁ − V₂\n= ${f(r.cavity_volume)} − ${f(r.boss_volume)} = ${f(r.solder_volume)} mm³。`;
   const area=`A₁ = W × X − 2 × Y²\n= ${f(t.length)} × ${f(t.width)} − 2 × ${f(t.chamfer)}² = ${f(r.preform_area)} mm²。`;
-  const z=`Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`;
+  const z=`錫片厚度 Z = (V₁₋₁ − V₂) / A₁\n= (${f(r.cavity_volume)} − ${f(r.boss_volume)}) / ${f(r.preform_area)} = ${f(r.calculated_thickness)} mm\n依設計尺寸（Typ.）做體積扣除估算；最終厚度由製程切片選定。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`;
   setFormula('v-cavity',cavity);setFormula('v-boss',boss);setFormula('v-area',area);setFormula('metric-volume',volume);setFormula('metric-z',z);setFormula('metric-model',t.thickness_override===null?`模型 Z 自動採用計算 Z = ${f(r.calculated_thickness)} mm。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`:`模型 Z 使用目前選定試片 = ${f(r.model_thickness)} mm。\n計算 Z = ${f(r.calculated_thickness)} mm，保留作比較。\n點選 ? 開啟全螢幕體積圖解與尺寸定位。`);
   setFormula('trials',`三款試片厚度 = 計算 Z − 增減量、Z、Z + 增減量\n= ${f(r.calculated_thickness)} − ${f(t.trial_delta)}、${f(r.calculated_thickness)}、${f(r.calculated_thickness)} + ${f(t.trial_delta)}\n= ${r.trial_thicknesses.map(f).join(' / ')} mm。`);
   for(const axis of ['x','y']){
@@ -547,8 +547,6 @@ $('download-zip').addEventListener('click', () => runExport('download-zip', asyn
       files[fileName(name,'dxf')] = drawingDxf(name, r, template);
       files[fileName(name,'pdf')] = await drawingPdfBytes(name, r, template, watermark);
       files[fileName(name,'step')] = new Uint8Array(await model.step.arrayBuffer());
-      files[fileName(name,'stl')] = new Uint8Array(await model.stl.arrayBuffer());
-      files[fileName(name,'dxf','outline')] = strToU8(drawing(r, name));
       const number = titleBlockPartNumber(r.design, name), view = name === 'preform' ? preformDrawingLayout(r) : drawingLayout(r);
       drawings[name] = { dxf: fileName(name,'dxf'), pdf: fileName(name,'pdf'), part_no: number.partNo, rev: number.rev, part_number: number.full || null, view_scale: view.label, ...(name === 'copper' ? { detail_scale: view.detail.label } : { drawn_thickness: drawnThickness(r) }) };
     }
@@ -558,10 +556,13 @@ $('download-zip').addEventListener('click', () => runExport('download-zip', asyn
       native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
     report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange and six pins follow illustrative datasheet proportions; SPH fixes the lead reference plane. Only PA length, width, tolerance and SPH affect manufacturing calculations.' };
     report.layout = { file: fileName('layout','dxf'), ...layoutReport(snapshot.layout, r) };
+    // 3D assembly: copper coin with the preform on the main boss, as delivered for reflow.
+    files[fileName('assembly','step')] = new Uint8Array(await snapshot.assembly.step.arrayBuffer());
+    report.step = { colors: { copper: '#b87333', preform: '#8e44ad' }, parts: Object.fromEntries(Object.keys(snapshot.parts).map(name => [name, fileName(name,'step')])), assembly: fileName('assembly','step') };
     report.drawings = { format: 'Delta drawing format of 348001J40001 (DXF R2000, PDF A4)', cover_sheet: sheet.cover, sheets: sheet.cover ? 2 : 1, watermark: watermark ? 'behind page content' : 'none', ...drawings };
     files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));
-    for (const path of ['creo_runner.py', 'WINDOWS_CREO7.md', 'THIRD_PARTY_LICENSES.txt']) {
+    for (const path of ['creo_runner.py']) {
       const response = await fetch(base + path);
       if (!response.ok) throw new Error(`${path} 下載失敗（${response.status}），請重新整理網站。`);
       files[path] = new Uint8Array(await response.arrayBuffer());

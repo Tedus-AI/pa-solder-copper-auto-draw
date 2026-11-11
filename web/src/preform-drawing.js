@@ -9,7 +9,15 @@
 // tools, so arrows, extension lines, text and stacked tolerances look the same.
 // The approved drawing is at 3:1; larger preforms step down like the copper drawing.
 
-import { templateWriter, drawingTools, finishSheet, encodeDxf, general, DRAWING_SHEET } from './copper-drawing.js';
+import {
+  templateWriter,
+  drawingTools,
+  finishSheet,
+  encodeDxf,
+  general,
+  DRAWING_SHEET,
+  NOTE_STYLE,
+} from './copper-drawing.js';
 import { titleBlockPartNumber } from './part-numbers.js';
 
 const { AREA, NOTE_LINE, SHEET_SCALE } = DRAWING_SHEET;
@@ -134,7 +142,9 @@ export function preformDrawingText(r, template, { cover = true, date = new Date(
   });
 
   // ── notes under the side view ──
-  PREFORM_NOTES.forEach((line, i) => w.text(msp, line, [right + NOTE_OFFSET, bottom - NOTE_DROP - i * NOTE_LINE]));
+  PREFORM_NOTES.forEach((line, i) =>
+    w.text(msp, line, [right + NOTE_OFFSET, bottom - NOTE_DROP - i * NOTE_LINE], { style: NOTE_STYLE }),
+  );
 
   return finishSheet(w, template, d, {
     cover,

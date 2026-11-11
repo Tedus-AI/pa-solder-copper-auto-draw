@@ -11,6 +11,8 @@ function zipName(files,label,ext,suffix=''){
   assert.equal(hits.length,1,`${label}${suffix}.${ext} in ${Object.keys(files).join(', ')}`);return hits[0];
 }
 const zipFile=(files,...args)=>files[zipName(files,...args)];
+// Mounting holes drawn as full circles on the part outline layer of the 2D drawing.
+const holeCircles=bytes=>(new TextDecoder('big5').decode(bytes).match(/\n {2}0\nCIRCLE\n {2}5\n[0-9A-F]+\n330\n[0-9A-F]+\n100\nAcDbEntity\n {2}8\nCOIN_DXF_CONTINUOUS_LINE\n/g)||[]).length;
 async function withDeadline(operation,ms,label){
   let timer;
   try{return await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`${label} timed out after ${ms}ms`)),ms);})]);}
@@ -322,8 +324,18 @@ async function withDeadline(operation,ms,label){
     const download = await downloaded; assert.match(download.suggestedFilename(),/^基地台 PA 專案 _ 測試_PA_Copper_CAD_\d{8}\.zip$/,'project name with "/" made safe');
     const file = path.join(output, 'pa_780_m1p.zip'); await download.saveAs(file);
     const files = unzipSync(fs.readFileSync(file));
-    for (const name of ['report.json', 'creo_job.json', 'creo_runner.py', 'WINDOWS_CREO7.md']) assert.ok(files[name], `Missing ${name}`);
-    for (const label of ['Copper_Coin','Solder_Preform']) for (const [ext,suffix] of [['step'],['stl'],['dxf'],['pdf'],['dxf','_outline']]) zipName(files,label,ext,suffix);
+    for (const name of ['report.json', 'creo_job.json', 'creo_runner.py', 'parameters.yaml', 'sha256.json']) assert.ok(files[name], `Missing ${name}`);
+    for (const label of ['Copper_Coin','Solder_Preform']) for (const ext of ['step','dxf','pdf']) zipName(files,label,ext);
+    // Not in the bundle: outline DXFs, STL, the Creo guide and the license text (both stay on the website).
+    assert.deepEqual(Object.keys(files).filter(n=>/\.stl$|_outline\.dxf$|WINDOWS_CREO7|THIRD_PARTY/.test(n)),[]);
+    // Coloured STEP: copper in copper, preform in purple; the assembly holds both, named.
+    const colours=text=>[...text.matchAll(/COLOUR_RGB\('',([\d.E+-]+),([\d.E+-]+),([\d.E+-]+)\)/g)].map(m=>m.slice(1).map(v=>Math.round(Number(v)*255)));
+    const near=(got,want)=>got.length===want.length&&got.every((c,i)=>c.every((v,k)=>Math.abs(v-want[i][k])<=3));
+    assert.ok(near(colours(strFromU8(zipFile(files,'Copper_Coin','step'))),[[184,115,51]]),'copper colour #b87333');
+    assert.ok(near(colours(strFromU8(zipFile(files,'Solder_Preform','step'))),[[142,68,173]]),'preform purple #8e44ad');
+    const assembly=strFromU8(zipFile(files,'Coin_Solder_Assembly','step'));
+    assert.ok(assembly.includes("PRODUCT('Copper_Coin'")&&assembly.includes("PRODUCT('Solder_Preform'"),'assembly lists both parts');
+    assert.ok(near(colours(assembly).sort((a,b)=>a[0]-b[0]),[[142,68,173],[184,115,51]]),'assembly colours');
     // 2D drawings in the company format: Big5 text, cover sheet included by default
     const sheetDrawing=new TextDecoder('big5').decode(zipFile(files,'Copper_Coin','dxf'));
     assert.match(sheetDrawing,/\$ACADVER\n {2}1\nAC1015\n/);assert.ok(sheetDrawing.includes('1.發行圖面')&&sheetDrawing.includes('348XXXXXXX'));
@@ -331,7 +343,7 @@ async function withDeadline(operation,ms,label){
     const preformSheet=new TextDecoder('big5').decode(zipFile(files,'Solder_Preform','dxf'));
     assert.ok(preformSheet.includes('1.Material:96.5Sn3Ag0.5Cu COATED WITH 0.5%F8 FLUX')&&preformSheet.includes('Solder preform 20.6*9.8*'),'preform drawing notes and description');
     for (const label of ['Copper_Coin','Solder_Preform']) {const pdf=zipFile(files,label,'pdf');assert.equal(strFromU8(pdf.slice(0,5)),'%PDF-');assert.equal((strFromU8(pdf).match(/\/Type \/Page\b/g)||[]).length,2,'cover + drawing page');}
-    assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).length,2);
+    assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).length,3);
     assert.ok(strFromU8(zipFile(files,'Coin_Solder_Masker','dxf')).includes('EPAD_OPENING'));
     for (const label of ['Copper_Coin','Solder_Preform']) assert.ok(strFromU8(zipFile(files,label,'step')).includes('ISO-10303-21;'));
     const report = JSON.parse(strFromU8(files['report.json']));
@@ -352,7 +364,7 @@ async function withDeadline(operation,ms,label){
       const event=page.waitForEvent('download');await page.locator('#download-zip').click();
       const customPath=path.join(output,'four-corners.zip');await(await event).saveAs(customPath);
       const custom=unzipSync(fs.readFileSync(customPath));
-      assert.equal((strFromU8(zipFile(custom,'Copper_Coin','dxf','_outline')).match(/\nCIRCLE\n/g)||[]).length,4);
+      assert.equal(holeCircles(zipFile(custom,'Copper_Coin','dxf')),4);
       assert.equal(JSON.parse(strFromU8(custom['creo_job.json'])).native_parameters.copper.HOLE_MASK,15);
       await resetToDefaults();
     }
@@ -373,7 +385,7 @@ async function withDeadline(operation,ms,label){
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'corner-breakouts.png')});
     const brokenDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const brokenFile=path.join(output,'broken-corners.zip');await(await brokenDownload).saveAs(brokenFile);
     const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['report.json']));
-    assert.equal(broken.results.hole_breakouts,2);assert.equal((strFromU8(zipFile(brokenFiles,'Copper_Coin','dxf','_outline')).match(/\nCIRCLE\n/g)||[]).length,0);
+    assert.equal(broken.results.hole_breakouts,2);assert.equal(holeCircles(zipFile(brokenFiles,'Copper_Coin','dxf')),0);
     assert.equal(broken.verification,'volume_and_step_roundtrip_passed');
     await resetToDefaults();
     // Auto linkage must update the readonly fields, preview, thickness and actual exports.
