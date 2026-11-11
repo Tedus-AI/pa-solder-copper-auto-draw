@@ -160,6 +160,45 @@ test('opening a database file merges newer browser projects and keeps the file a
   assert.deepEqual(changes, ['file']);
 });
 
+test("a database folder keeps projects only: SharePoint bookkeeping stays, colleagues' changes come in", async () => {
+  const db = new ProjectDatabase({ storage: memoryStorage() });
+  const a = db.save(design('A'));
+  db.sync.setEtag(a.id, '"a,1"', 'c1');
+  const colleague = {
+    id: 'c',
+    schema_version: 1,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    design: design('C 同事新增'),
+  };
+  let next = { ok: true, incoming: [], removed: [] };
+  const folder = { storesSync: false, write: async () => next };
+  await db.attachFile(folder, JSON.stringify({ format: 'pa-copper-cad-db', version: 1, projects: {} }));
+  assert.equal(db.sync.state().etags[a.id], '"a,1"', 'eTags are not lost when the folder is attached');
+  const changes = [];
+  db.on('change', info => changes.push(info));
+  next = { ok: true, incoming: [colleague], removed: [a.id] };
+  await db.persistFile();
+  assert.deepEqual(
+    db.list().map(p => p.id),
+    ['c'],
+  );
+  assert.deepEqual([changes[0].source, changes[0].pulled, changes[0].removed], ['file', ['c'], [a.id]]);
+  assert.equal(db.sync.state().dirty.c, undefined, "a colleague's project is not re-uploaded by this browser");
+  // import: a backup / earlier single database file, or one project file
+  next = { ok: true, incoming: [], removed: [] };
+  const imported = await db.importText(
+    JSON.stringify({
+      format: 'pa-copper-cad-project-v1',
+      id: 'p',
+      project: { ...colleague, id: 'p', design: design('P') },
+    }),
+  );
+  assert.equal(imported.added, 1);
+  assert.ok(db.get('p') && db.sync.state().dirty.p);
+  await assert.rejects(db.importText('not json'), /JSON/);
+});
+
 test('database file write problems are reported instead of claiming the project was saved', async () => {
   const db = new ProjectDatabase({ storage: memoryStorage() });
   for (const [result, state] of [

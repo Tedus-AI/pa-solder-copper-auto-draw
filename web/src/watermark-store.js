@@ -3,7 +3,7 @@
 // The file is kept as its own file in a Watermark folder next to the database —
 // never inside the project database JSON:
 //   · SharePoint (when 雙存檔 is on): Thermal-Spec-DB / 文件 / PA_Copper_CAD / Watermark /
-//   · local: <chosen folder> / Watermark /  (choose the folder that holds the database file)
+//   · local: <database folder> / Watermark /  (or a separately chosen folder)
 //   · this browser keeps a copy (IndexedDB) so PDFs can be made offline.
 // Each Watermark folder holds the file and watermark.json (file name, size, SHA-256,
 // time and the appearance). The newest copy wins when the folders are read again.
@@ -68,7 +68,9 @@ export class WatermarkStore {
     sp = null,
     storage = globalThis.localStorage,
     picker = globalThis.window,
+    dbFolder = () => null,
   } = {}) {
+    this.dbFolder = dbFolder; // the local database folder, used unless a folder is chosen here
     this.handles = handles;
     this.sp = sp;
     this.storage = storage;
@@ -109,8 +111,11 @@ export class WatermarkStore {
   }
 
   // ───────── local Watermark folder ─────────
+  base() {
+    return this.folder ?? this.dbFolder() ?? null;
+  }
   folderName() {
-    return this.folder?.name ?? null;
+    return this.base()?.name ?? null;
   }
   async tryRestoreFolder() {
     const saved = await this.handles.get(FOLDER_KEY);
@@ -148,10 +153,11 @@ export class WatermarkStore {
     }
   }
   async localDir(create) {
-    if (!this.folder) return null;
-    if ((await this.folder.queryPermission({ mode: 'readwrite' })) !== 'granted') return null;
+    const base = this.base();
+    if (!base) return null;
+    if ((await base.queryPermission({ mode: 'readwrite' })) !== 'granted') return null;
     try {
-      return await this.folder.getDirectoryHandle(WATERMARK_FOLDER, { create });
+      return await base.getDirectoryHandle(WATERMARK_FOLDER, { create });
     } catch {
       return null;
     }
@@ -247,7 +253,7 @@ export class WatermarkStore {
       notes = [];
     try {
       if (await this.writeLocal(record, meta)) saved.push(`本機 ${this.folderName()}/${WATERMARK_FOLDER}`);
-      else if (this.folder) notes.push('本機浮水印資料夾需要重新授權');
+      else if (this.base()) notes.push('本機資料夾需要重新授權');
     } catch (error) {
       notes.push(`本機資料夾寫入失敗：${error.message}`);
     }

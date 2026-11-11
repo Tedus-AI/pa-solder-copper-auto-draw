@@ -17,7 +17,7 @@
 
 專案名稱與PA型號並排，支援中文及單行文字；專案名稱必填，PA型號可留空。Typ.表示未加上下公差的設計尺寸，不是實測平均值。銅塊基座、中凸台、四角小凸台整合於同一銅塊設定區；L標示為「中凸台總高L」。
 
-專案保存完整尺寸、公差、專案名稱、專案ID、PA品牌、PA型號與銅塊／錫片料號，支援重新載入、更新、另存與刪除。工作副本在project-db.js：一律寫入瀏覽器快取；在「設定」選擇本機資料庫檔（local-file-db.js，File System Access API，可放共用磁碟）後同時寫入該檔，檔案被他人修改時停止寫入不覆蓋；備份資料夾每日一份、保留30份。開啟SharePoint雙存檔（sp-sync.js，沿用Thermal-Test-Report-Builder的設計）後，專案逐一存成Thermal-Spec-DB／文件／PA_Copper_CAD/Database/projects/<id>.json，以eTag避免覆蓋同事的修改（衝突時另存「衝突副本」），每日備份至PA_Copper_CAD/Backup保留2份。專案名稱可從AI-Thermal工具的ToolDatabase/thermal_db.json專案清單下拉選擇，本工具只讀不寫。CAD檔名代碼design.name與人可讀的project.name／project.pa_model分開，保持原生Creo檔名規則與舊參數檔相容。
+專案保存完整尺寸、公差、專案名稱、專案ID、PA品牌、PA型號與銅塊／錫片料號，支援重新載入、更新、另存與刪除。工作副本在project-db.js：一律寫入瀏覽器快取；在「設定」選擇本機資料庫資料夾（local-file-db.js，File System Access API，可放共用磁碟）後，每個專案存成一份 JSON：`<資料夾>/Database/projects/專案名稱_ID前8碼.json`（內容格式與 SharePoint 的專案檔相同），每次儲存只寫入有變更的專案，改名時檔案跟著改名，刪除時刪檔；同事在資料夾中新增、修改或刪除的專案會在儲存或切回視窗時讀入，同一專案兩邊都改時停止寫入不覆蓋。舊版的單一資料庫檔可用「匯入 JSON 檔…」匯入。備份資料夾每日一份、保留30份。開啟SharePoint雙存檔（sp-sync.js，沿用Thermal-Test-Report-Builder的設計）後，專案逐一存成Thermal-Spec-DB／文件／PA_Copper_CAD/Database/projects/<id>.json，以eTag避免覆蓋同事的修改（衝突時另存「衝突副本」），每日備份至PA_Copper_CAD/Backup保留2份。專案名稱可從AI-Thermal工具的ToolDatabase/thermal_db.json專案清單下拉選擇，本工具只讀不寫。CAD檔名代碼design.name與人可讀的project.name／project.pa_model分開，保持原生Creo檔名規則與舊參數檔相容。
 
 ## 公差來源與鎖定
 
@@ -106,7 +106,7 @@ SOLDER_MASK與EPAD_OPENING具封閉輪廓及SOLID HATCH，極性明確。V用於
 - **DXF**：R2000、代碼頁 ANSI_950（Big5），與原圖相同；Big5 以外的字元以 `\U+XXXX` 寫入。
 - **PDF**（dxf-pdf.js）：直接由同一份 DXF 文字繪製向量 PDF，封面 A4 直式、圖面 A4 橫式（圖面 1 單位＝1.5 mm）。出圖方式比照使用者以 AutoCAD 從原圖轉出的 PDF（有浮水範例.pdf）：全部黑色、所有線條為髮絲線（線寬 0），DELTA 標誌、圖框與文字粗細與原圖相同。文字依 DXF 字型樣式：字型檔為 arial.ttf 的樣式（標題欄、Note）以 Arial 字寬（Helvetica）繪製；其他樣式（尺寸、中文標籤、封面）比照原圖的微軟正黑體——字級比 0.7566、拉丁字依正黑體字寬逐字排列，中文使用繁中黑體 MHei-Medium；封面料號的 PMingLiU 以 Times／MSung-Light 代替。字型不內嵌，由 Acrobat 與瀏覽器提供。與原圖逐字比對：標題欄與 Note 的字級、位置誤差小於 0.03 pt。pdf-lib 只在第一次輸出 PDF 時載入。
 - **浮水印**：勾選「浮水印」後套用「設定 → 浮水印」上傳的 PDF／PNG／JPG。作法比照使用者以 Acrobat 手動加浮水印的範例（有浮水範例.pdf）：取浮水印 PDF 的 ArtBox（圖片為整張）等比縮放到頁面短邊的 80%、置中、不透明度 50%、旋轉 0°，包在透明群組中並放在頁面內容之前繪製，因此位於圖面之下（背景）；與範例逐點比對位置與顏色一致。比例、不透明度、旋轉可在設定中調整。
-- **浮水印存放**（watermark-store.js）：檔案與 watermark.json（檔名、大小、SHA-256、時間、外觀）另存於 Watermark 資料夾，不併入專案資料庫 JSON：SharePoint 為 Thermal-Spec-DB／文件／PA_Copper_CAD/Watermark；本機為設定中所選資料夾（建議選資料庫檔所在的資料夾）下的 Watermark。瀏覽器另保留一份副本供離線輸出；重新讀取時採用最新的一份。
+- **浮水印存放**（watermark-store.js）：檔案與 watermark.json（檔名、大小、SHA-256、時間、外觀）另存於 Watermark 資料夾，不併入專案資料庫 JSON：SharePoint 為 Thermal-Spec-DB／文件／PA_Copper_CAD/Watermark；本機為資料庫資料夾（或另選的資料夾）下的 Watermark。瀏覽器另保留一份副本供離線輸出；重新讀取時採用最新的一份。
 
 ## 輸出檔名
 
@@ -122,7 +122,7 @@ SOLDER_MASK與EPAD_OPENING具封閉輪廓及SOLID HATCH，極性明確。V用於
 
 **STEP**：銅塊與錫片的 STEP 帶零件名稱與顏色（AP214），CAD 開啟即為銅色（#b87333）與紫色（#8e44ad）。
 
-**完整出圖包內容**：兩個零件的 2D 圖面 DXF／PDF 與 STEP、組合 STEP、Layout 綠漆 DXF，以及 report.json（計算結果、驗證與各檔對照）、parameters.yaml（可重新載入的完整設計參數）、creo_job.json 與 creo_runner.py（在已授權 Creo 7 上產生原生參數化 PRT 用）、sha256.json（各檔雜湊，確認檔案未被更動）。STL、簡易外形 DXF、Creo 說明與開源授權文字不放入出圖包（Creo 說明與授權仍在網站「設定 → 說明」）。專案ID 與專案名稱同列，為本工具專用欄位，不與 AI-Thermal 等其他工具連動。
+**完整出圖包內容**：兩個零件的 2D 圖面 DXF／PDF 與 STEP、組合 STEP、Layout 綠漆 DXF，以及 creo_job.json 與 creo_runner.py（在已授權 Creo 7 上產生原生參數化 PRT 用；creo_job.json 也記錄完整設計與計算結果）。report.json、parameters.yaml、sha256.json、STL、簡易外形 DXF、Creo 說明與開源授權文字不放入出圖包（Creo 說明與授權仍在網站「設定 → 說明」）。專案ID 與專案名稱同列，為本工具專用欄位，不與 AI-Thermal 等其他工具連動。
 
 範本 `web/public/drawing/copper-drawing-template.json` 由 `web/scripts/build-drawing-template.py` 從儲存庫根目錄的 `348001J40001.dxf` 產生（需要 ezdxf）；原圖格式更新時重新執行即可：
 
