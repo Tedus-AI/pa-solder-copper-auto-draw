@@ -65,7 +65,22 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#tol-preform-thickness_override-minus').isVisible(),false);
     // Settings: database file, backup folder, SharePoint and help.
     await page.locator('#settings-open').click();assert.equal(await page.locator('#settings-dialog').isVisible(),true);
-    for(const id of ['db-open','db-import','backup-pick','backup-download','sp-enable','ai-refresh','help-open'])assert.equal(await page.locator(`#${id}`).isVisible(),true,id);
+    for(const id of ['db-open','db-import','backup-pick','backup-download','sp-enable','ai-refresh','help-open','version-check'])assert.equal(await page.locator(`#${id}`).isVisible(),true,id);
+    // Version: header label from package.json; 設定 → 版本 compares this build with the deployed version.json.
+    const appVersion=`v${JSON.parse(fs.readFileSync(path.join(__dirname,'..','package.json'),'utf8')).version}`;
+    const deployedInfo=await (await fetch(new URL('version.json',url),{cache:'no-store'})).json();
+    assert.equal(deployedInfo.version,appVersion.slice(1),'version.json carries the package version');
+    assert.equal(await page.locator('#app-version').textContent(),appVersion);assert.equal(await page.locator('#settings-version').textContent(),appVersion);
+    assert.match(await page.locator('#app-version').getAttribute('title'),new RegExp(`${deployedInfo.commit}$`));
+    assert.match(await page.locator('#settings-build').textContent(),new RegExp(`^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2} · ${deployedInfo.commit}$`));
+    await page.waitForFunction(()=>!!document.getElementById('settings-deployed').dataset.state);
+    assert.match(await page.locator('#settings-deployed').textContent(),/：已是最新版本$/);assert.equal(await page.locator('#app-update').isVisible(),false);
+    await page.route('**/version.json*',route=>route.fulfill({contentType:'application/json',body:JSON.stringify({version:'99.0.0',commit:'fffffff',built:new Date(Date.now()+864e5).toISOString()})}));
+    await page.locator('#version-check').click();await page.locator('#app-update').waitFor({state:'visible'});
+    assert.match(await page.locator('#app-update').textContent(),/^有新版本v99\.0\.0重新整理$/);assert.equal(await page.locator('#version-reload').isVisible(),true);
+    assert.match(await page.locator('#settings-deployed').textContent(),/^v99\.0\.0（.* · fffffff）：有新版本/);
+    await page.locator('.topbar').screenshot({path:path.join(output,'header-update.png')});
+    await page.unroute('**/version.json*');await page.locator('#version-check').click();await page.locator('#app-update').waitFor({state:'hidden'});
     assert.match(await page.locator('#settings-sp-location').textContent(),/Thermal-Spec-DB \/ 文件 \/ PA_Copper_CAD/);
     assert.match(await page.locator('#settings-ai-source').textContent(),/^SharePoint：Thermal-Spec-DB \/ 文件 \/ ToolDatabase \/ thermal_db\.json$/);
     await page.locator('#help-open').click();assert.equal(await page.locator('#help-dialog').isVisible(),true);assert.equal(await page.locator('#settings-dialog').isVisible(),false);await page.locator('#help-close').click();
@@ -275,7 +290,8 @@ async function withDeadline(operation,ms,label){
     await page.locator('#stack-pad_height').focus();await page.waitForFunction(()=>document.getElementById('viewer').dataset.dimension==='stack.pad_height');
     assert.equal(await page.locator('#viewer').getAttribute('data-arrow-placement'),'outside');
     await page.locator('#copper-base_thickness').focus();await page.waitForFunction(()=>document.getElementById('viewer').dataset.dimension==='copper.base_thickness');
-    const textStyle=await page.locator('.dimension-number').evaluate(el=>({fill:getComputedStyle(el).fill,opacity:getComputedStyle(el).opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}));
+    // Read the style once the label is attached: a label replaced by a redraw has no computed style (CI flake).
+    const textStyle=await (await page.waitForFunction(()=>{const el=document.querySelector('.dimension-number');if(!el?.isConnected)return null;const style=getComputedStyle(el);return style.fill?{fill:style.fill,opacity:style.opacity,parentOpacity:getComputedStyle(el.parentElement).opacity}:null;})).jsonValue();
     assert.deepEqual(textStyle,{fill:'rgb(96, 41, 15)',opacity:'1',parentOpacity:'1'});
     await page.locator('#ref-epad').uncheck();
     await page.locator('#pcb-opening_length').focus();
@@ -426,7 +442,24 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#tol-package-length-plus').inputValue(),'0.327');
     assert.equal(await page.locator('#pcb-opening_length').inputValue(),'21.6');
     assert.equal(await page.locator('#project-select').inputValue(),savedId);
-    assert.equal(await page.locator('#project-select option').count(),2);
+    // Saved list: the reloaded project, and the named project from the bundle check (auto-saved); not the deleted copy.
+    const savedOptions=await page.locator('#project-select option').allTextContents();
+    assert.equal(savedOptions.length,3,savedOptions.join(' | '));
+    assert.ok(savedOptions.some(t=>t.startsWith('儲存重載測試'))&&savedOptions.some(t=>t.startsWith('基地台 PA 專案 / 測試'))&&!savedOptions.some(t=>t.startsWith('另存副本')),savedOptions.join(' | '));
+    // Auto-save: an edit to the open project is saved 2 s later without 儲存 and survives a reload;
+    // a change still pending is saved when the page closes.
+    assert.equal(await page.locator('#autosave').isChecked(),true,'auto-save is on by default');
+    await page.locator('#project-id').fill('AUTO-001');assert.match(await page.locator('#project-save-status').textContent(),/^編輯中，將自動儲存$/);
+    await page.waitForFunction(()=>/^已自動儲存 /.test(document.getElementById('project-save-status').textContent),null,{timeout:10000});
+    await page.reload({waitUntil:'networkidle'});await modelReady();assert.equal(await page.locator('#project-id').inputValue(),'AUTO-001');
+    await page.locator('#project-id').fill('AUTO-002');await page.reload({waitUntil:'networkidle'});await modelReady();
+    assert.equal(await page.locator('#project-id').inputValue(),'AUTO-002','a pending change is saved when the page closes');
+    // Turned off (remembered by this browser): edits wait for 儲存.
+    await page.locator('#autosave').uncheck();await page.locator('#project-id').fill('MANUAL-003');
+    assert.equal(await page.locator('#project-save-status').textContent(),'有未儲存的變更');
+    await page.reload({waitUntil:'networkidle'});await modelReady();
+    assert.equal(await page.locator('#autosave').isChecked(),false);assert.equal(await page.locator('#project-id').inputValue(),'AUTO-002');
+    await page.locator('#autosave').check();
     await page.locator('#tolerance-unlock').click();
     await page.locator('#pcb-auto').uncheck();
     await page.locator('#pcb-opening_length').fill('22');await page.locator('#pcb-opening_width').fill('11');
@@ -438,6 +471,9 @@ async function withDeadline(operation,ms,label){
     await page.locator('#pcb-auto').check();
     await page.waitForFunction(()=>document.getElementById('pcb-opening_length').value==='21.4'&&document.getElementById('pcb-opening_width').value==='10.6');
     await resetToDefaults();
+    // A new project without a name of its own is not auto-saved (no record is created, even on close).
+    await page.locator('#copper-hole_edge_offset').fill('1.1');assert.equal(await page.locator('#project-save-status').textContent(),'尚未儲存；輸入專案名稱後自動儲存');
+    await resetToDefaults();assert.equal(await page.locator('#project-select option').count(),3);
     await page.locator('#tab-preform').click();
     const stepDownload = page.waitForEvent('download'); await page.locator('#download-step').click();
     assert.match((await stepDownload).suggestedFilename(), /_Solder_Preform_\d{8}\.step$/);
@@ -497,7 +533,7 @@ async function withDeadline(operation,ms,label){
     await page.locator('#drawing-cover').check();
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});
     assert.equal(await page.locator('#metric-model').textContent(), '0.535851');
-    // A lock on a new or edited project is not written silently; save first.
+    // A lock on a new project without a name is not written silently; save first.
     await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');assert.match(await page.locator('#project-save-status').textContent(),/尚未儲存/);
     await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'false');
     await page.locator('#project-save').click();assert.match(await page.locator('#project-save-status').textContent(),/已儲存/);
@@ -507,12 +543,13 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.54');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.54 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
     const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['creo_job.json']));assert.equal(trialReport.derived.trial_status,'locked');assert.ok(Math.abs(trialReport.derived.model_thickness-trialReport.derived.calculated_thickness-.15)<1e-10);
     await page.locator('#copper-pad_size').fill('1.6');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
-    await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.match(await page.locator('#project-save-status').textContent(),/已解鎖，尚未儲存/);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
+    await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.match(await page.locator('#project-save-status').textContent(),/^試片已解鎖，將自動儲存$/);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
     await focusNominal('copper.pad_size');await page.locator('#copper-pad_size').fill('4'); await page.locator('#generate').click();
     await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /削角/);
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
     await resetToDefaults();
     await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator('#app-version').isVisible(),true,'version label stays visible on phones');
     await page.locator('#viewer').scrollIntoViewIfNeeded();
     for(const key of annotationNames){await focusNominal(key);await checkAnnotation(key);}
     await focusNominal('copper.corner_radius');

@@ -19,6 +19,8 @@ import { MsalAuth } from './msal-auth.js';
 import { setupStorageUI } from './storage-ui.js';
 import {chamferFor,TRIAL_DELTA,emptyTrial,trialChoices} from './preform-rules.js';
 import { createCalculationGuide } from './calculation-guide.js';
+import { setupVersionUI } from './app-version.js';
+import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAutosavePreference } from './autosave.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
@@ -257,7 +259,18 @@ function syncProjectMetadata(){
   projectMetadataValid=true;refreshExportButtons();
   return project;
 }
-function markDirty(message='有未儲存的變更'){projectDirty=true;projectMessage(message);}
+// ───── auto-save (autosave.js): 2 s after the last change, through saveProject ─────
+let deletedName=null;
+const autoSaver=new AutoSaver({save:()=>autosaveNow()});
+const saveMode=()=>autosaveMode({enabled:$('autosave').checked,activeId:activeProjectId,name:$('project-name').value,defaultName:defaults.project.name,deletedName});
+const saveHint=()=>autosaveHint(saveMode(),!!activeProjectId);
+const autoSaving=mode=>mode==='update'||mode==='create';
+function autosaveNow(){return projectDirty&&projectMetadataValid&&autoSaving(saveMode())?saveProject(false,{auto:true}):null;}
+function markDirty(message){
+  projectDirty=true;const mode=saveMode();
+  projectMessage(message??(mode==='off'?'有未儲存的變更':mode==='update'?'編輯中，將自動儲存':saveHint()));
+  if(autoSaving(mode))autoSaver.schedule();else autoSaver.cancel();
+}
 function projectMessage(message,failed=false){spSync.setEditing(projectDirty?activeProjectId:null);const output=$('project-save-status');output.textContent=message;output.title=message;output.classList.toggle('save-error',failed);}
 function refreshProjectList(){
   const select=$('project-select'),placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='載入已儲存專案…';
@@ -269,13 +282,17 @@ function refreshProjectList(){
   select.value=activeProjectId||'';$('project-delete').disabled=!activeProjectId;
 }
 function submitProjectModel(){if(busy)rebuildQueued=true;else $('design-form').requestSubmit();}
-function saveProject(asNew=false){
+function saveProject(asNew=false,{auto=false}={}){
+  autoSaver.cancel();
   try{
-    clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
+    if(!auto)clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
     const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;activeRecordStamp=record.updated_at;
-    $('project-name').value=design.project.name;$('project-id').value=design.project.project_id;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;syncProjectMetadata();refreshProjectList();
-    projectDirty=false;projectMessage(`已儲存 ${new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'})}`);return record;
-  }catch(e){projectMessage(e.message,true);return null;}
+    // Auto-save leaves the project fields alone: they may still be being typed in.
+    if(!auto){$('project-name').value=design.project.name;$('project-id').value=design.project.project_id;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;deletedName=null;}
+    syncProjectMetadata();refreshProjectList();
+    projectDirty=false;const time=new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+    projectMessage(`${auto?'已自動儲存':'已儲存'} ${time}${navigator.onLine===false&&spSync.isEnabled()?'；離線中，恢復連線後上傳 SharePoint':''}`);return record;
+  }catch(e){projectMessage(auto?`自動儲存暫停：${e.message}`:e.message,true);return null;}
 }
 function initializeProjects(){
   fill(structuredClone(defaults));
@@ -292,7 +309,7 @@ projectStore.on('change',info=>{
   refreshProjectList();
   if(!activeProjectId)return;
   const record=projectStore.get(activeProjectId);
-  if(!record){activeProjectId=null;refreshProjectList();projectMessage(info.source==='sharepoint'?'此專案已在 SharePoint 被刪除；畫面內容保留':'資料庫中沒有此專案；畫面內容保留');return;}
+  if(!record){activeProjectId=null;deletedName=$('project-name').value.trim();autoSaver.cancel();refreshProjectList();projectMessage(info.source==='sharepoint'?'此專案已在 SharePoint 被刪除；畫面內容保留':'資料庫中沒有此專案；畫面內容保留');return;}
   const touched=info.source==='file'||(info.pulled||[]).includes(activeProjectId)||(info.restored||[]).includes(activeProjectId);
   if(!touched||projectDirty||record.updated_at===activeRecordStamp)return;
   try{fill(calculate(record.design).design);activeRecordStamp=record.updated_at;projectDirty=false;projectMessage(info.source==='sharepoint'?'已載入同事在 SharePoint 更新的版本':'已從資料庫資料夾載入');invalidate();submitProjectModel();}
@@ -303,6 +320,7 @@ $('project-save').addEventListener('click',()=>saveProject());
 $('project-save-as').addEventListener('click',()=>saveProject(true));
 $('project-select').addEventListener('change',()=>{
   const id=$('project-select').value;if(!id)return;
+  autoSaver.flush();deletedName=null;// pending edits of the open project are saved before switching
   try{
     const record=projectStore.get(id);if(!record)throw new Error('找不到這個專案。');
     const design=calculate(record.design).design;projectStore.activate(id);activeProjectId=id;activeRecordStamp=record.updated_at;fill(design);refreshProjectList();
@@ -311,11 +329,18 @@ $('project-select').addEventListener('change',()=>{
 });
 $('project-delete').addEventListener('click',()=>{
   if(!activeProjectId)return;
+  autoSaver.cancel();deletedName=$('project-name').value.trim();
   try{projectStore.remove(activeProjectId);activeProjectId=null;refreshProjectList();projectMessage('已刪除記錄，畫面內容保留');}
   catch(e){projectMessage(e.message,true);}
 });
 
+// Auto-save preference (per browser); a pending change is saved when the page is hidden or closed.
+$('autosave').checked=readAutosavePreference();
+$('autosave').addEventListener('change',()=>{writeAutosavePreference($('autosave').checked);if(projectDirty)markDirty();else autoSaver.cancel();});
+window.addEventListener('pagehide',()=>autoSaver.flush());
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')autoSaver.flush();});
 $('design-form').addEventListener('input',event=>{
+  if(event.target.id==='project-select'||event.target.id==='autosave')return;
   if(['project-name','project-id','pa-brand','pa-model'].includes(event.target.id)){
     try{syncProjectMetadata();markDirty();}
     catch(e){projectMetadataValid=false;refreshExportButtons();projectMessage(e.message,true);}
@@ -361,9 +386,9 @@ function renderTrial(r){
   const zTolerance=toleranceSuffix(r.design,'preform.thickness_override');$('thickness-tolerance-text').textContent=zTolerance?`${zTolerance} mm`:'公差未指定';
 }
 $('trial-choice').addEventListener('change',()=>{trialRecord.choice=$('trial-choice').value;invalidate();refreshPreview(true);markDirty();});
-// Locking records the verified trial. It is written to storage immediately only
-// when it is the sole change to an already saved project; otherwise it would
-// silently persist unrelated edits or create a project, so the user saves.
+// Locking records the verified trial. It is written to storage immediately when it
+// is the sole change to an already saved project; otherwise it is saved with the
+// other edits by auto-save (or 儲存 when auto-save is off or the project has no name).
 $('trial-lock').addEventListener('click',()=>{
   const previous=structuredClone(trialRecord),wasDirty=projectDirty;
   try{
@@ -372,7 +397,7 @@ $('trial-lock').addEventListener('click',()=>{
     invalidate();refreshPreview(true);
     const action=trialRecord.locked?'試片已鎖定':'試片已解鎖';
     if(activeProjectId&&!wasDirty){if(!saveProject())throw new Error('試片結果無法儲存，已保留原鎖定狀態；請確認瀏覽器儲存空間。');projectMessage(`${action}並儲存`);}
-    else markDirty(`${action}，尚未儲存；請按「儲存」${activeProjectId?'':'建立專案'}保存`);
+    else markDirty(`${action}，${saveHint()}`);
     submitProjectModel();
   }catch(e){trialRecord=previous;projectDirty=wasDirty;refreshPreview();error(e.message);}
 });
@@ -590,7 +615,7 @@ $('part-no').addEventListener('input',event=>{
   entry.part_no=clean;if(full)entry.rev=all.slice(-2);partNumberChanged();
 });
 $('part-rev').addEventListener('change',event=>{const entry=partNumbers[part];if(entry.locked||part==='layout')return;entry.rev=event.target.value;partNumberChanged();});
-// Locking writes to storage at once only when it is the sole change to a saved project.
+// Locking writes to storage at once when it is the sole change to a saved project; otherwise auto-save.
 $('part-lock').addEventListener('click',()=>{
   if(part==='layout')return;
   const entry=partNumbers[part],wasDirty=projectDirty;
@@ -598,7 +623,7 @@ $('part-lock').addEventListener('click',()=>{
   entry.locked=!entry.locked;
   const action=`${PART_LABELS[part]}料號已${entry.locked?'鎖定':'解鎖'}`;
   if(activeProjectId&&!wasDirty){partNumberChanged();if(saveProject())projectMessage(`${action}並儲存`);}
-  else partNumberChanged(`${action}，尚未儲存；請按「儲存」${activeProjectId?'':'建立專案'}保存`);
+  else partNumberChanged(`${action}，${saveHint()}`);
 });
 
 // ───── watermark (設定 → 浮水印) ─────
@@ -637,6 +662,7 @@ $('settings-open').addEventListener('click',renderWatermark);
 
 
 initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');storageUI.start();
+setupVersionUI({$,hasUnsavedChanges:()=>{autoSaver.flush();return projectDirty;}});
 // The JavaScript preview is shown first; the OpenCascade WebAssembly engine
 // (several MB) is fetched and the export model built once the page is idle.
 const buildWhenIdle=()=>submitProjectModel();

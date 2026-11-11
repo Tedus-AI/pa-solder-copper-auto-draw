@@ -341,6 +341,12 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     window.addEventListener('focus', () => {
       if (fileDb.isReady() && !fileDb.hasConflict()) db.persistFile();
     });
+    // Back online: what was saved meanwhile goes to the database folder (a network
+    // drive may have been away) and to SharePoint now, not at the next retry.
+    window.addEventListener('online', () => {
+      if (fileDb.isReady() && !fileDb.hasConflict()) db.persistFile();
+      sp.schedulePush(500);
+    });
     await sp.tryRestore();
   }
   return { start, open, renderLocal, renderSharePoint, loadAiProjects, combobox };
