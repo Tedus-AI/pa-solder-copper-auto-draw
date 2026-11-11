@@ -1,15 +1,14 @@
 import './style.css';
 import { zipSync, strToU8 } from 'fflate';
-import { stringify } from 'yaml';
 import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject } from './design.js';
 import { toleranceDefaults, getTolerance, toleranceText, toleranceSource, toleranceSuffix } from './tolerances.js';
 import { faceViews } from './camera-views.js';
 import { formatDimension } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
-import { copperDrawingText, drawingLayout, encodeDxf, DRAWING_TEMPLATE_PATH } from './copper-drawing.js';
-import { preformDrawingText, preformDrawingLayout, drawnThickness } from './preform-drawing.js';
-import { emptyPartNumbers, cleanPartNo, fullPartNumber, titleBlockPartNumber, REVISIONS, PART_LABELS, PART_NO_BASE_LENGTH } from './part-numbers.js';
+import { copperDrawingText, encodeDxf, DRAWING_TEMPLATE_PATH } from './copper-drawing.js';
+import { preformDrawingText } from './preform-drawing.js';
+import { emptyPartNumbers, cleanPartNo, fullPartNumber, REVISIONS, PART_LABELS, PART_NO_BASE_LENGTH } from './part-numbers.js';
 import { outputFileName } from './file-names.js';
 import { WatermarkStore } from './watermark-store.js';
 import { CADViewer } from './viewer.js';
@@ -296,7 +295,7 @@ projectStore.on('change',info=>{
   if(!record){activeProjectId=null;refreshProjectList();projectMessage(info.source==='sharepoint'?'此專案已在 SharePoint 被刪除；畫面內容保留':'資料庫中沒有此專案；畫面內容保留');return;}
   const touched=info.source==='file'||(info.pulled||[]).includes(activeProjectId)||(info.restored||[]).includes(activeProjectId);
   if(!touched||projectDirty||record.updated_at===activeRecordStamp)return;
-  try{fill(calculate(record.design).design);activeRecordStamp=record.updated_at;projectDirty=false;projectMessage(info.source==='sharepoint'?'已載入同事在 SharePoint 更新的版本':'已從資料庫檔案載入');invalidate();submitProjectModel();}
+  try{fill(calculate(record.design).design);activeRecordStamp=record.updated_at;projectDirty=false;projectMessage(info.source==='sharepoint'?'已載入同事在 SharePoint 更新的版本':'已從資料庫資料夾載入');invalidate();submitProjectModel();}
   catch(e){projectMessage(e.message,true);}
 });
 const storageUI=setupStorageUI({db:projectStore,fileDb:localFile,sp:spSync,onNotice:message=>projectMessage(message)});
@@ -438,7 +437,6 @@ Y四捨五入到小數第二位，實際間隙 = ${f(r.corner_clearance)} mm。`
   if(activeFormulaButton)showFormula(activeFormulaButton);
 }
 
-function layoutReport(g,r){return {rules:r.design.layout,grid_pitch:g.pitch,epad_cells:g.cells.length,epad_area_mm2:g.epad_area,mask_area_mm2:g.mask_area,edge_web_margins_mm:g.boundary_margins,chord_tolerance_mm:g.chord_tolerance,notes:g.notes};}
 function requestModel(design) {
   if (!worker) {
     worker = new Worker(new URL('./cad.worker.js', import.meta.url), { type: 'module' });
@@ -536,40 +534,25 @@ $('download-dxf').addEventListener('click', () => {
   if (result) save(drawing(result.results, part), fileName(part,'dxf','outline'));
 });
 const json = obj => JSON.stringify(obj, null, 2) + '\n';
+// Bundle: the 2D drawings (DXF + PDF) and STEP of both parts, the copper + preform
+// assembly STEP, the Layout DXF, and the Creo job with its runner.
 $('download-zip').addEventListener('click', () => runExport('download-zip', async () => {
   if (!result) return;
   const snapshot = result;
   try {
-    const r = snapshot.results, files = {}, template = await loadDrawingTemplate(), watermark = await pdfWatermark().catch(() => null), sheet = { cover: $('drawing-cover').checked };
+    const r = snapshot.results, files = {}, template = await loadDrawingTemplate(), watermark = await pdfWatermark().catch(() => null);
     files[fileName('layout','dxf')] = strToU8(layoutDxf(r, snapshot.layout));
-    const drawings = {};
     for (const [name, model] of Object.entries(snapshot.parts)) {
       files[fileName(name,'dxf')] = drawingDxf(name, r, template);
       files[fileName(name,'pdf')] = await drawingPdfBytes(name, r, template, watermark);
       files[fileName(name,'step')] = new Uint8Array(await model.step.arrayBuffer());
-      const number = titleBlockPartNumber(r.design, name), view = name === 'preform' ? preformDrawingLayout(r) : drawingLayout(r);
-      drawings[name] = { dxf: fileName(name,'dxf'), pdf: fileName(name,'pdf'), part_no: number.partNo, rev: number.rev, part_number: number.full || null, view_scale: view.label, ...(name === 'copper' ? { detail_scale: view.detail.label } : { drawn_thickness: drawnThickness(r) }) };
     }
-    const report = { schema_version: 3, created_at_utc: new Date().toISOString(), engine: 'OpenCascade WebAssembly / Replicad', units: { length: 'mm', area: 'mm2', volume: 'mm3' },
-      parameters: r.design, results: r, verification: snapshot.verification,
-      cad_volumes_mm3: Object.fromEntries(Object.entries(snapshot.parts).map(([key, v]) => [key, v.volume])),
-      native_prt: { status: 'not_generated', required_model_type: 'native_parametric_features', target: 'Creo Parametric 7.0.10.0 / Windows 11', reason: 'Requires local licensed Creo and real native parametric master models.' } };
-    report.reference_geometry = { pcb: 'display_only', pa: 'display_only', note: 'PA casing/flange and six pins follow illustrative datasheet proportions; SPH fixes the lead reference plane. Only PA length, width, tolerance and SPH affect manufacturing calculations.' };
-    report.layout = { file: fileName('layout','dxf'), ...layoutReport(snapshot.layout, r) };
     // 3D assembly: copper coin with the preform on the main boss, as delivered for reflow.
     files[fileName('assembly','step')] = new Uint8Array(await snapshot.assembly.step.arrayBuffer());
-    report.step = { colors: { copper: '#b87333', preform: '#8e44ad' }, parts: Object.fromEntries(Object.keys(snapshot.parts).map(name => [name, fileName(name,'step')])), assembly: fileName('assembly','step') };
-    report.drawings = { format: 'Delta drawing format of 348001J40001 (DXF R2000, PDF A4)', cover_sheet: sheet.cover, sheets: sheet.cover ? 2 : 1, watermark: watermark ? 'behind page content' : 'none', ...drawings };
-    files['report.json'] = strToU8(json(report)); files['parameters.yaml'] = strToU8(stringify(r.design));
     files['creo_job.json'] = strToU8(json(nativeJob(r)));
-    for (const path of ['creo_runner.py']) {
-      const response = await fetch(base + path);
-      if (!response.ok) throw new Error(`${path} 下載失敗（${response.status}），請重新整理網站。`);
-      files[path] = new Uint8Array(await response.arrayBuffer());
-    }
-    const hashes = {};
-    for (const [name, bytes] of Object.entries(files)) hashes[name] = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), v => v.toString(16).padStart(2, '0')).join('');
-    files['sha256.json'] = strToU8(json(hashes));
+    const response = await fetch(base + 'creo_runner.py');
+    if (!response.ok) throw new Error(`creo_runner.py 下載失敗（${response.status}），請重新整理網站。`);
+    files['creo_runner.py'] = new Uint8Array(await response.arrayBuffer());
     save(zipSync(files, { level: 6 }), fileName('bundle','zip'));
   } catch (e) { throw new Error(`打包失敗：${e.message}`); }
 }));
@@ -619,13 +602,13 @@ $('part-lock').addEventListener('click',()=>{
 });
 
 // ───── watermark (設定 → 浮水印) ─────
-const watermarkStore=new WatermarkStore({sp:spSync});
+const watermarkStore=new WatermarkStore({sp:spSync,dbFolder:()=>localFile.rootDir()});
 async function renderWatermark(){
   const record=await watermarkStore.cached(),appearance=watermarkStore.appearance();
   $('settings-wm-file').textContent=record?`${record.name}（${record.kind.toUpperCase()}，${(record.size/1024).toFixed(0)} KB，${new Date(record.updated_at).toLocaleString('zh-TW',{hour12:false})}）`:'尚未上傳';
   const places=['此瀏覽器'];if(watermarkStore.folderName())places.push(`本機 ${watermarkStore.folderName()}/Watermark`);if(spSync.isEnabled())places.push('SharePoint PA_Copper_CAD/Watermark');
   $('settings-wm-location').textContent=places.join('、');
-  $('settings-wm-folder').textContent=watermarkStore.folderName()??'未設定';
+  $('settings-wm-folder').textContent=watermarkStore.folder?watermarkStore.folder.name:localFile.rootDir()?`${localFile.rootDir().name}（資料庫資料夾）`:'未設定';
   for(const[key,id]of [['scale','wm-scale'],['opacity','wm-opacity'],['rotation','wm-rotation']])if(document.activeElement!==$(id))$(id).value=appearance[key];
   $('wm-remove').disabled=!record;
   const box=$('drawing-watermark');box.disabled=!record;box.closest('label').title=record?'2D 圖面 PDF 打上浮水印（置於圖面內容之下）':'尚未上傳浮水印：設定 → 浮水印';

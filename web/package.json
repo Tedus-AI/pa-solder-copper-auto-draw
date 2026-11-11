@@ -19,8 +19,7 @@
     "polygon-clipping": "0.15.7",
     "replicad": "1.2.0",
     "replicad-opencascadejs": "1.1.0",
-    "three": "0.187.0",
-    "yaml": "2.8.2"
+    "three": "0.187.0"
   },
   "devDependencies": {
     "@eslint/js": "9.36.0",

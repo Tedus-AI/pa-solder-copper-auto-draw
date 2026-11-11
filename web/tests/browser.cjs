@@ -3,7 +3,6 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const { unzipSync, strFromU8 } = require('fflate');
 // Output names: <project>_Copper_Coin_<YYYYMMDD>, _Solder_Preform_, _Coin_Solder_Masker_ (file-names.js).
 function zipName(files,label,ext,suffix=''){
@@ -66,7 +65,7 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#tol-preform-thickness_override-minus').isVisible(),false);
     // Settings: database file, backup folder, SharePoint and help.
     await page.locator('#settings-open').click();assert.equal(await page.locator('#settings-dialog').isVisible(),true);
-    for(const id of ['db-open','db-create','backup-pick','backup-download','sp-enable','ai-refresh','help-open'])assert.equal(await page.locator(`#${id}`).isVisible(),true,id);
+    for(const id of ['db-open','db-import','backup-pick','backup-download','sp-enable','ai-refresh','help-open'])assert.equal(await page.locator(`#${id}`).isVisible(),true,id);
     assert.match(await page.locator('#settings-sp-location').textContent(),/Thermal-Spec-DB \/ 文件 \/ PA_Copper_CAD/);
     assert.match(await page.locator('#settings-ai-source').textContent(),/^SharePoint：Thermal-Spec-DB \/ 文件 \/ ToolDatabase \/ thermal_db\.json$/);
     await page.locator('#help-open').click();assert.equal(await page.locator('#help-dialog').isVisible(),true);assert.equal(await page.locator('#settings-dialog').isVisible(),false);await page.locator('#help-close').click();
@@ -324,7 +323,10 @@ async function withDeadline(operation,ms,label){
     const download = await downloaded; assert.match(download.suggestedFilename(),/^基地台 PA 專案 _ 測試_PA_Copper_CAD_\d{8}\.zip$/,'project name with "/" made safe');
     const file = path.join(output, 'pa_780_m1p.zip'); await download.saveAs(file);
     const files = unzipSync(fs.readFileSync(file));
-    for (const name of ['report.json', 'creo_job.json', 'creo_runner.py', 'parameters.yaml', 'sha256.json']) assert.ok(files[name], `Missing ${name}`);
+    // Bundle: drawings (DXF + PDF) and STEP of both parts, assembly STEP, Layout DXF and the Creo job only.
+    for (const name of ['creo_job.json', 'creo_runner.py']) assert.ok(files[name], `Missing ${name}`);
+    assert.equal(Object.keys(files).length, 10, Object.keys(files).join(', '));
+    for (const name of ['report.json', 'parameters.yaml', 'sha256.json']) assert.equal(files[name], undefined, `${name} is not bundled`);
     for (const label of ['Copper_Coin','Solder_Preform']) for (const ext of ['step','dxf','pdf']) zipName(files,label,ext);
     // Not in the bundle: outline DXFs, STL, the Creo guide and the license text (both stay on the website).
     assert.deepEqual(Object.keys(files).filter(n=>/\.stl$|_outline\.dxf$|WINDOWS_CREO7|THIRD_PARTY/.test(n)),[]);
@@ -346,17 +348,13 @@ async function withDeadline(operation,ms,label){
     assert.deepEqual(Object.keys(files).filter(n=>n.endsWith('.step')).length,3);
     assert.ok(strFromU8(zipFile(files,'Coin_Solder_Masker','dxf')).includes('EPAD_OPENING'));
     for (const label of ['Copper_Coin','Solder_Preform']) assert.ok(strFromU8(zipFile(files,label,'step')).includes('ISO-10303-21;'));
-    const report = JSON.parse(strFromU8(files['report.json']));
-    assert.equal(report.verification, 'volume_and_step_roundtrip_passed'); assert.equal(report.native_prt.status, 'not_generated');
-    assert.equal(report.reference_geometry.pcb,'display_only');assert.equal(report.reference_geometry.pa,'display_only');
-    assert.deepEqual([report.drawings.copper.dxf,report.drawings.cover_sheet,report.drawings.sheets,report.drawings.copper.view_scale,report.drawings.preform.view_scale,report.drawings.copper.rev],[zipName(files,'Copper_Coin','dxf'),true,2,'3:2','3:1','00']);
-    assert.ok(report.layout.epad_cells>200);
-    assert.ok(Math.abs(report.cad_volumes_mm3.preform - 68.97470674352311) < .001);
-    const hashes = JSON.parse(strFromU8(files['sha256.json']));
-    for (const [name, digest] of Object.entries(hashes)) assert.equal(crypto.createHash('sha256').update(files[name]).digest('hex'), digest);
+    // The Creo job carries the full design and results (what report.json used to hold).
+    const report = JSON.parse(strFromU8(files['creo_job.json']));
+    assert.equal(report.status, 'awaiting_local_creo_execution');
+    assert.ok(Math.abs(report.expected.preform.volume - 68.97470674352311) < .001);
     const job = JSON.parse(strFromU8(files['creo_job.json'])); assert.equal(job.step_import_acceptable, false); assert.equal(job.target.version, '7.0.10.0');
-    assert.deepEqual(report.parameters.project,projectMetadata);assert.deepEqual(job.design.project,projectMetadata);
-    assert.equal(report.parameters.pcb.opening_mode,'auto');assert.equal(report.parameters.pcb.opening_rule,'delta');
+    assert.deepEqual(job.design.project,projectMetadata);
+    assert.equal(job.design.pcb.opening_mode,'auto');assert.equal(job.design.pcb.opening_rule,'delta');
     if(shardIndex===0){
       for(const corner of ['top_left','top_right','bottom_left','bottom_right'])await page.locator(`[data-hole-corner=${corner}]`).check();
       await page.locator('#generate').click();await modelReady();
@@ -375,8 +373,8 @@ async function withDeadline(operation,ms,label){
     assert.ok(Math.abs((moved.worldA[0]+moved.worldB[0])/2-3)<1e-6);
     await page.locator('#generate').click();await modelReady();
     const shiftedDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const shiftedFile=path.join(output,'shifted-boss.zip');await(await shiftedDownload).saveAs(shiftedFile);
-    const shiftedFiles=unzipSync(fs.readFileSync(shiftedFile)),shifted=JSON.parse(strFromU8(shiftedFiles['report.json']));
-    assert.deepEqual(shifted.results.boss_center,[3,2]);assert.ok(Math.abs(shifted.results.copper_volume-report.results.copper_volume)<1e-6);
+    const shiftedFiles=unzipSync(fs.readFileSync(shiftedFile)),shifted=JSON.parse(strFromU8(shiftedFiles['creo_job.json']));
+    assert.deepEqual(shifted.derived.boss_center,[3,2]);assert.ok(Math.abs(shifted.derived.copper_volume-report.derived.copper_volume)<1e-6);
     const shiftedJob=JSON.parse(strFromU8(shiftedFiles['creo_job.json']));assert.equal(shiftedJob.native_parameters.copper.BOSS_X,3);assert.equal(shiftedJob.native_parameters.copper.BOSS_Y,2);
     // A hole crossing a rounded corner must survive genuine CAD/STEP validation.
     await resetToDefaults();await page.locator('#copper-hole_edge_offset').fill('1');
@@ -384,9 +382,9 @@ async function withDeadline(operation,ms,label){
     assert.equal((await page.locator('#viewer').getAttribute('data-copper-shades')).split(',').length,3);
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'corner-breakouts.png')});
     const brokenDownload=page.waitForEvent('download');await page.locator('#download-zip').click();const brokenFile=path.join(output,'broken-corners.zip');await(await brokenDownload).saveAs(brokenFile);
-    const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['report.json']));
-    assert.equal(broken.results.hole_breakouts,2);assert.equal(holeCircles(zipFile(brokenFiles,'Copper_Coin','dxf')),0);
-    assert.equal(broken.verification,'volume_and_step_roundtrip_passed');
+    const brokenFiles=unzipSync(fs.readFileSync(brokenFile)),broken=JSON.parse(strFromU8(brokenFiles['creo_job.json']));
+    assert.equal(broken.derived.hole_breakouts,2);assert.equal(holeCircles(zipFile(brokenFiles,'Copper_Coin','dxf')),0);
+    assert.ok(strFromU8(zipFile(brokenFiles,'Copper_Coin','step')).includes('ISO-10303-21;'));
     await resetToDefaults();
     // Auto linkage must update the readonly fields, preview, thickness and actual exports.
     assert.equal(await page.locator('#pcb-opening_length').getAttribute('aria-readonly'),'true');
@@ -404,12 +402,11 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
     const linkedDownload=page.waitForEvent('download');await page.locator('#download-zip').click();
     const linkedFile=path.join(output,'linked-parameters.zip');await (await linkedDownload).saveAs(linkedFile);
-    const linkedFiles=unzipSync(fs.readFileSync(linkedFile)),linked=JSON.parse(strFromU8(linkedFiles['report.json']));
-    assert.deepEqual([linked.results.boss_length,linked.results.boss_width],[21.1,10.3]);
-    assert.deepEqual([linked.parameters.pcb.opening_length,linked.parameters.pcb.opening_width],[21.6,10.8]);
-    assert.equal(linked.verification,'volume_and_step_roundtrip_passed');
-    assert.ok(Math.abs(linked.cad_volumes_mm3.preform-linked.results.solder_volume)<.001);
-    assert.notEqual(linked.results.model_thickness,report.results.model_thickness);
+    const linkedFiles=unzipSync(fs.readFileSync(linkedFile)),linked=JSON.parse(strFromU8(linkedFiles['creo_job.json']));
+    assert.deepEqual([linked.derived.boss_length,linked.derived.boss_width],[21.1,10.3]);
+    assert.deepEqual([linked.design.pcb.opening_length,linked.design.pcb.opening_width],[21.6,10.8]);
+    assert.ok(Math.abs(linked.expected.preform.volume-linked.derived.solder_volume)<.001);
+    assert.notEqual(linked.derived.model_thickness,report.derived.model_thickness);
     await page.locator('[data-hole-corner=top_left]').check();
     for(const corner of ['bottom_left','bottom_right','top_right'])await page.locator(`[data-hole-corner=${corner}]`).uncheck();
     await page.locator('#project-name').fill('儲存重載測試');
@@ -508,7 +505,7 @@ async function withDeadline(operation,ms,label){
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),true);assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');
     await page.reload({waitUntil:'networkidle'});await modelReady();assert.equal(await page.locator('#trial-choice').inputValue(),'upper');assert.equal(await page.locator('#trial-choice').isDisabled(),true);
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.54');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.54 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
-    const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['report.json']));assert.equal(trialReport.results.trial_status,'locked');assert.ok(Math.abs(trialReport.results.model_thickness-trialReport.results.calculated_thickness-.15)<1e-10);
+    const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['creo_job.json']));assert.equal(trialReport.derived.trial_status,'locked');assert.ok(Math.abs(trialReport.derived.model_thickness-trialReport.derived.calculated_thickness-.15)<1e-10);
     await page.locator('#copper-pad_size').fill('1.6');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);assert.match(await page.locator('#project-save-status').textContent(),/已解鎖，尚未儲存/);assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
     await focusNominal('copper.pad_size');await page.locator('#copper-pad_size').fill('4'); await page.locator('#generate').click();

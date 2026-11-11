@@ -7,8 +7,9 @@
 //
 // Persistence (same model as Thermal-Test-Report-Builder):
 //   · browser cache (localStorage) — always written, so the tool works with no setup;
-//   · local database file (File System Access API, optional) — the shared working
-//     file once chosen in 設定; see local-file-db.js;
+//   · local database folder (File System Access API, optional) — chosen once in 設定;
+//     every project is its own JSON file there (Database/projects/), as on SharePoint;
+//     see local-file-db.js;
 //   · SharePoint (optional) — sp-sync.js pushes exactly the projects marked dirty
 //     here and pulls what colleagues changed. Its bookkeeping (sp_sync) lives in this
 //     document, so pending uploads survive a reload or a period offline.
@@ -150,7 +151,12 @@ export class ProjectDatabase {
     const current = this.ensure();
     const fromFile = isNew ? emptyDb() : parseDbText(text);
     const merged = mergeProjects(fromFile, current);
-    const doc = { ...fromFile, projects: merged.projects };
+    // A database folder keeps projects only; the SharePoint bookkeeping stays here.
+    const doc = {
+      ...fromFile,
+      projects: merged.projects,
+      sp_sync: file.storesSync === false ? clone(current.sp_sync) : fromFile.sp_sync,
+    };
     for (const id of merged.added) doc.sp_sync.dirty[id] = (doc.sp_sync.dirty[id] || 0) + 1;
     this.doc = doc;
     this.file = file;
@@ -162,18 +168,20 @@ export class ProjectDatabase {
 
   detachFile() {
     this.file = null;
-    this.setLocal('cache', '未設定本機資料庫檔案；專案暫存在此瀏覽器。');
+    this.setLocal('cache', '未設定本機資料庫資料夾；專案暫存在此瀏覽器。');
   }
 
   /** Re-read the database file after someone else changed it (discards unsynced edits in this window). */
   async reloadFromFile() {
     if (!this.file) return;
     const text = await this.file.read({ force: true });
+    const sync = this.ensure().sp_sync;
     this.doc = parseDbText(text);
+    if (this.file.storesSync === false) this.doc.sp_sync = clone(sync);
     this.generation++;
     this.writeCache();
     this.emit('change', { source: 'file' });
-    this.setLocal('saved', '已重新讀取資料庫檔案');
+    this.setLocal('saved', '已重新讀取資料庫資料夾');
   }
 
   // ───────── project API (used by the project controls) ─────────
@@ -262,17 +270,56 @@ export class ProjectDatabase {
   }
   async persistFile() {
     if (!this.file) {
-      this.setLocal('cache', '未設定本機資料庫檔案；專案暫存在此瀏覽器。');
+      this.setLocal('cache', '未設定本機資料庫資料夾；專案暫存在此瀏覽器。');
       this.emit('write');
       return;
     }
     this.setLocal('saving', '寫入本機資料庫…');
     const result = await this.file.write(this.text());
+    if (result.ok) this.applyFolderChanges(result);
     if (result.ok) this.setLocal('saved', '');
-    else if (result.conflict) this.setLocal('conflict', '資料庫檔案已被其他人或其他分頁修改；為避免覆蓋已停止寫入。');
-    else if (result.needsPermission) this.setLocal('needs-permission', '需要重新授權讀寫本機資料庫檔案。');
+    else if (result.conflict)
+      this.setLocal('conflict', '同一專案在資料庫資料夾中也被其他人修改；為避免覆蓋已停止寫入。');
+    else if (result.needsPermission) this.setLocal('needs-permission', '需要重新授權讀寫本機資料庫資料夾。');
     else this.setLocal('error', result.message || '本機資料庫寫入失敗。');
     this.emit('write');
+  }
+  /** Projects colleagues added, changed or deleted in the shared database folder. */
+  applyFolderChanges({ incoming = [], removed = [] }) {
+    if (!incoming.length && !removed.length) return;
+    const doc = this.ensure();
+    for (const record of incoming) doc.projects[record.id] = clone(record);
+    for (const id of removed) {
+      delete doc.projects[id];
+      if (this.activeId() === id) this.setActiveId(null);
+    }
+    this.generation++;
+    this.writeCache();
+    this.emit('change', { source: 'file', pulled: incoming.map(r => r.id), removed });
+  }
+  /**
+   * Import a database snapshot (one JSON with every project, e.g. a backup or the earlier
+   * single database file) or one project file; newer versions win. → { added }
+   */
+  async importText(text) {
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error('檔案不是有效的 JSON。');
+    }
+    const projects =
+      data?.format === 'pa-copper-cad-project-v1' && isObject(data.project) && typeof data.id === 'string'
+        ? { [data.id]: { ...data.project, id: data.id } }
+        : normalizeDb(data).projects;
+    if (Object.values(projects).some(r => !validRecord(r))) throw new Error('專案資料格式不正確。');
+    const merged = mergeProjects(this.ensure(), { projects });
+    this.ensure().projects = merged.projects;
+    for (const id of merged.added) this.markDirty(id);
+    this.generation++;
+    this.emit('change', { source: 'file', pulled: merged.added });
+    await this.persist();
+    return { added: merged.added.length };
   }
   setLocal(state, message) {
     this.localStatus = { state, message: message || '', at: state === 'saved' ? new Date() : this.localStatus.at };

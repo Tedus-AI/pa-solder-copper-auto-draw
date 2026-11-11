@@ -85,15 +85,15 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     setChip(
       'status-local',
       chip,
-      `本機資料庫：${fileName ?? '未設定（專案暫存在此瀏覽器）'}\n${chip.text}${status.message ? `\n${status.message}` : ''}\n點選開啟設定`,
+      `本機資料庫資料夾：${fileName ?? '未設定（專案暫存在此瀏覽器）'}\n${chip.text}${status.message ? `\n${status.message}` : ''}\n點選開啟設定`,
     );
-    $('settings-db-file').textContent = fileName ?? '未設定（專案暫存在此瀏覽器）';
+    $('settings-db-file').textContent = fileName ? `${fileName}（每個專案一份 JSON）` : '未設定（專案暫存在此瀏覽器）';
     $('db-forget').hidden = !fileName;
     $('db-reconnect').hidden = status.state !== 'needs-permission';
     $('db-conflict').hidden = status.state !== 'conflict';
     $('settings-backup-dir').textContent = fileDb.backupDirName() ?? '未設定';
     $('backup-now').disabled = !fileDb.backupDirName();
-    for (const id of ['db-open', 'db-create', 'backup-pick']) $(id).disabled = !fileApi;
+    for (const id of ['db-open', 'backup-pick']) $(id).disabled = !fileApi;
     $('file-api-note').hidden = fileApi;
   }
   const localMessage = (text, failed = false) => {
@@ -123,10 +123,11 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     }
     try {
       const merged = await db.attachFile(fileDb, result.text, { isNew: !!result.isNew });
+      const count = db.list().length;
       localMessage(
         result.isNew
-          ? `已建立 ${result.name}，目前的專案已寫入。`
-          : `已開啟 ${result.name}${merged.merged ? `，並合併此瀏覽器的 ${merged.merged} 個較新專案` : ''}。`,
+          ? `已設定資料庫資料夾 ${result.name}：${count} 個專案已各自存成 JSON（Database/projects）。`
+          : `已開啟資料庫資料夾 ${result.name}（${count} 個專案，每個專案一份 JSON）${merged.merged ? `，並合併此瀏覽器的 ${merged.merged} 個較新專案` : ''}。`,
       );
       if (sp.isEnabled()) sp.syncNow();
       return true;
@@ -140,18 +141,32 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     }
   }
   $('db-open').addEventListener('click', async () => attach(await fileDb.pick()));
-  $('db-create').addEventListener('click', async () => attach(await fileDb.create()));
+  $('db-import').addEventListener('click', () => $('db-import-file').click());
+  $('db-import-file').addEventListener('change', async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const { added } = await db.importText(await file.text());
+      localMessage(
+        `已匯入 ${file.name}：${added} 個專案${fileDb.isReady() ? '已寫入資料庫資料夾' : '已存在此瀏覽器'}（同一專案保留較新的版本）。`,
+      );
+    } catch (error) {
+      localMessage(`匯入失敗：${error.message}`, true);
+    }
+    renderLocal();
+  });
   $('db-reconnect').addEventListener('click', async () => attach(await fileDb.reconnect()));
   $('db-forget').addEventListener('click', async () => {
     await fileDb.forget();
     db.detachFile();
-    localMessage('已中斷本機資料庫檔案；專案改為暫存在此瀏覽器，檔案本身未刪除。');
+    localMessage('已中斷本機資料庫資料夾；專案改為暫存在此瀏覽器，資料夾內的檔案未刪除。');
     renderLocal();
   });
   $('db-reload').addEventListener('click', async () => {
     try {
       await db.reloadFromFile();
-      localMessage('已重新讀取資料庫檔案；此視窗尚未寫入的修改已捨棄。');
+      localMessage('已重新讀取資料庫資料夾；此視窗尚未寫入的修改已捨棄。');
     } catch (error) {
       localMessage(error.message, true);
     }
@@ -160,7 +175,7 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
   $('db-overwrite').addEventListener('click', async () => {
     const result = await fileDb.write(db.text(), { overwrite: true });
     if (result.ok) db.setLocal('saved', '');
-    localMessage(result.ok ? '已以目前內容覆寫資料庫檔案。' : result.message || '覆寫失敗。', !result.ok);
+    localMessage(result.ok ? '已以目前內容覆寫資料庫資料夾中的專案檔。' : result.message || '覆寫失敗。', !result.ok);
     renderLocal();
   });
 
@@ -310,6 +325,10 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     if (fileApi) {
       const restored = await fileDb.tryRestore();
       if (restored.ok) await attach(restored);
+      else if (restored.legacy)
+        localMessage(
+          `本機資料庫已改為「資料庫資料夾」，每個專案一份 JSON。請按「選擇資料庫資料夾…」（可選原本 ${restored.name} 所在的資料夾），此瀏覽器的專案會逐一寫入；原資料庫檔可用「匯入 JSON 檔…」匯入。`,
+        );
       else if (restored.needsPermission) {
         db.setLocal('needs-permission', `需要重新授權讀寫 ${restored.name}（設定 → 重新授權）。`);
         $('settings-db-file').textContent = restored.name;
@@ -318,6 +337,10 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
       $('backup-reconnect').hidden = !backup.needsPermission;
     }
     renderLocal();
+    // Colleagues' projects in a shared database folder come in when this window is used again.
+    window.addEventListener('focus', () => {
+      if (fileDb.isReady() && !fileDb.hasConflict()) db.persistFile();
+    });
     await sp.tryRestore();
   }
   return { start, open, renderLocal, renderSharePoint, loadAiProjects, combobox };
