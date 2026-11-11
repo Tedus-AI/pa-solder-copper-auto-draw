@@ -117,7 +117,9 @@ async function withDeadline(operation,ms,label){
     };
     // 範例 was removed: a fresh page with no active project shows the default design
     // (saved projects stay in the database).
-    const resetToDefaults=async()=>{await page.evaluate(()=>localStorage.removeItem('pa-copper-cad.active-project'));await page.reload({waitUntil:'networkidle'});await modelReady();};
+    // A fresh unsaved project. Auto-save's own pagehide flush saves a pending edit and re-activates
+    // that project, so the active project is also cleared after it (listeners run in order).
+    const resetToDefaults=async()=>{await page.evaluate(()=>{const clear=()=>localStorage.removeItem('pa-copper-cad.active-project');clear();addEventListener('pagehide',clear);});await page.reload({waitUntil:'networkidle'});await modelReady();};
     assert.equal(await page.locator('.tolerance-input').count(),64);
     assert.equal(await page.locator('.tolerance-input').evaluateAll(inputs=>inputs.every(i=>i.readOnly)),true);
     assert.equal(await page.locator('#tol-copper-base_thickness-minus').inputValue(),'0.1');
