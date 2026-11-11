@@ -56,6 +56,8 @@ const MAIN_CENTER = [62.354, 57.882]; // the reference's main view centre
 const NOTE_X = 104.68,
   NOTE_TOP = 65.32,
   NOTE_LINE = 2.7;
+// The reference's notes use TEXTSTYLE_4 (arial.ttf); dimensions and labels STANDARD.
+export const NOTE_STYLE = 'TEXTSTYLE_4';
 /** Shared with the preform drawing (same format, title block and notes position). */
 export const DRAWING_LAYERS = { OUTLINE, AXIS, DIM, TXT };
 export const DRAWING_SHEET = { AREA, NOTE_X, NOTE_TOP, NOTE_LINE, SHEET_SCALE, TH };
@@ -206,8 +208,11 @@ export function templateWriter(template) {
         ...points.flatMap(([x, y]) => [10, x, 20, y]),
       );
     },
-    /** align 'right': the text ends at p (bottom-right alignment). */
-    text(space, s, p, { height = TH, layer = TXT, rotation = 0, align } = {}) {
+    /**
+     * align 'right': the text ends at p (bottom-right alignment). Style as on the
+     * reference: STANDARD for dimensions and labels, NOTE_STYLE (arial) for notes.
+     */
+    text(space, s, p, { height = TH, layer = TXT, rotation = 0, align, style = 'STANDARD' } = {}) {
       entity(
         space,
         'TEXT',
@@ -220,7 +225,7 @@ export function templateWriter(template) {
         s,
         ...(rotation ? [50, rotation] : []),
         7,
-        'STANDARD',
+        style,
       );
       if (align === 'right') write(space.out, [72, 2, ...xyz(11, p), 100, 'AcDbText', 73, 1]);
       else write(space.out, [100, 'AcDbText']);
@@ -1072,7 +1077,7 @@ export function copperDrawingText(r, template, { cover = true, date = new Date()
   w.text(msp, lay.detail.label, [130.93, 70.65]);
 
   // ── notes ──
-  DRAWING_NOTES.forEach((line, i) => w.text(msp, line, [NOTE_X, NOTE_TOP - i * NOTE_LINE]));
+  DRAWING_NOTES.forEach((line, i) => w.text(msp, line, [NOTE_X, NOTE_TOP - i * NOTE_LINE], { style: NOTE_STYLE }));
 
   return finishSheet(w, template, d, {
     cover,

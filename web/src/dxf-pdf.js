@@ -5,11 +5,13 @@
 //   The DXF sheet is the Creo export's A4 at 2/3 scale, so one sheet unit is 1.5 mm.
 // · Entities: LINE, ARC, CIRCLE, LWPOLYLINE (bulges), SPLINE (NURBS), SOLID, HATCH
 //   (SOLID fill and line patterns such as ANSI31), TEXT, MTEXT, INSERT, DIMENSION
-//   (its block) and LEADER (with its arrowhead). Everything is plotted black, with
-//   plotted line weights by layer, as the reference PDF printed from AutoCAD.
-// · Text: Helvetica (Arial metrics) for Latin text; Chinese uses the standard
-//   Traditional Chinese PDF font MSung-Light (Adobe-CNS1), which Acrobat and browsers
-//   provide, so no font file is embedded.
+//   (its block) and LEADER (with its arrowhead). Plotted as the reference PDF that
+//   AutoCAD printed from this drawing format: everything black and every line a
+//   hairline (line width 0), so the DELTA logo, frame and text stay as fine as there.
+// · Text: Helvetica (Arial metrics; the reference uses ArialMT) for Latin text;
+//   Chinese uses the standard Traditional Chinese sans font MHei-Medium (Adobe-CNS1;
+//   the reference uses Microsoft JhengHei), which Acrobat and browsers provide, so
+//   no font file is embedded.
 // · Watermark (optional): placed like Acrobat's 「新增浮水印」 from a file — the source
 //   page's ArtBox (or the whole image) scaled to a share of the page, centred, with
 //   opacity and rotation, and drawn first so it lies under the drawing content.
@@ -18,16 +20,8 @@ import { PDFDocument, PDFName, PDFString, StandardFonts } from 'pdf-lib';
 
 const MM = 72 / 25.4;
 export const A4 = { long: 841.89, short: 595.28 };
-// Plotted line weights (mm on paper): part outlines heavier, dimensions and text thin.
-const WEIGHTS = {
-  COIN_DXF_CONTINUOUS_LINE: 0.35,
-  '12_COIN_DXF_CONTINUOUS_LINE': 0.25,
-  COIN_DXF_AXIS: 0.18,
-  '12_COIN_DXF_DIMENSION': 0.18,
-  '12_COIN_DXF_TEXT': 0.18,
-  DIMENSION: 0.18,
-};
-const DEFAULT_WEIGHT = 0.25;
+// The reference plot draws every layer with line width 0 (the device's finest line).
+const PLOT_LINE_WIDTH = 0;
 const LINETYPES = {
   DASHED: [0.1, -0.1],
   HIDDEN: [0.1, -0.1],
@@ -35,7 +29,116 @@ const LINETYPES = {
   PHANTOM: [0.45, -0.05, 0.1, -0.05, 0.1, -0.05],
   DOT: [0, -0.1],
 };
-const CAP_HEIGHT = 0.716; // DXF text height is the capital height (Arial/Helvetica ≈ 0.716 em)
+// Text as AutoCAD plotted the reference: a DXF text height is the font's capital
+// height, so the em size is height / ratio. Styles whose font file is arial.ttf
+// plot in Arial; every other style (STANDARD, DELTA, the file-less "Arial") plots in
+// Microsoft JhengHei, and the cover's PMingLiU MTEXT in PMingLiU. Ratios measured
+// from the reference PDF (e.g. 1.8 → 10.69 pt Arial, 10.12 pt JhengHei on A4).
+const FAMILY_RATIO = { arial: 0.716, jhenghei: 0.7566, mingliu: 0.672 };
+// Microsoft JhengHei Latin advance widths (1/1000 em) from the font embedded in the
+// reference PDF; characters it does not use take the same design's (Segoe UI) widths.
+const JHENGHEI_WIDTHS = {
+  ' ': 250,
+  '!': 270,
+  '"': 400,
+  '#': 620,
+  $: 580,
+  '%': 855,
+  '&': 861,
+  "'": 240,
+  '(': 321,
+  ')': 321,
+  '*': 447,
+  '+': 750,
+  ',': 230,
+  '-': 432,
+  '.': 230,
+  '/': 417,
+  0: 580,
+  1: 580,
+  2: 580,
+  3: 580,
+  4: 580,
+  5: 580,
+  6: 580,
+  7: 580,
+  8: 580,
+  9: 580,
+  ':': 230,
+  ';': 230,
+  '<': 750,
+  '=': 750,
+  '>': 750,
+  '?': 450,
+  '@': 1030,
+  A: 693,
+  B: 614,
+  C: 668,
+  D: 755,
+  E: 544,
+  F: 525,
+  G: 739,
+  H: 763,
+  I: 284,
+  J: 377,
+  K: 636,
+  L: 505,
+  M: 965,
+  N: 805,
+  O: 814,
+  P: 601,
+  Q: 814,
+  R: 642,
+  S: 572,
+  T: 562,
+  U: 740,
+  V: 667,
+  W: 1004,
+  X: 646,
+  Y: 593,
+  Z: 623,
+  '[': 321,
+  '\\': 400,
+  ']': 321,
+  '^': 750,
+  _: 420,
+  '`': 270,
+  a: 547,
+  b: 634,
+  c: 498,
+  d: 634,
+  e: 563,
+  f: 361,
+  g: 634,
+  h: 609,
+  i: 259,
+  j: 261,
+  k: 539,
+  l: 259,
+  m: 928,
+  n: 608,
+  o: 631,
+  p: 632,
+  q: 634,
+  r: 372,
+  s: 456,
+  t: 363,
+  u: 608,
+  v: 513,
+  w: 775,
+  x: 512,
+  y: 513,
+  z: 481,
+  '{': 321,
+  '|': 240,
+  '}': 321,
+  '~': 750,
+  '±': 737,
+  Ø: 1000,
+  '°': 400,
+};
+const JHENGHEI_LATIN_CAP = 0.7; // capital height of JhengHei's Latin glyphs, in em
+const HELVETICA_CAP = 0.718;
 
 // ───────── DXF parsing ─────────
 function pairs(text) {
@@ -45,18 +148,22 @@ function pairs(text) {
   return out;
 }
 
-/** Entities of the ENTITIES section, blocks by name, and header values used for plotting. */
+/** Entities of the ENTITIES section, blocks by name, text styles (name → font file) and header values. */
 export function parseDxf(text) {
   const all = pairs(text),
     blocks = new Map(),
     entities = [],
+    styles = new Map(),
     header = {};
   let section = null,
     block = null,
     current = null;
   const finish = () => {
     if (!current) return;
-    if (block && current.type !== 'BLOCK') block.entities.push(current);
+    if (current.type === 'STYLE' && section === 'TABLES') {
+      const name = current.codes.find(([c]) => c === 2)?.[1];
+      if (name !== undefined) styles.set(name.toUpperCase(), current.codes.find(([c]) => c === 3)?.[1] ?? '');
+    } else if (block && current.type !== 'BLOCK') block.entities.push(current);
     else if (section === 'ENTITIES') entities.push(current);
     current = null;
   };
@@ -83,7 +190,8 @@ export function parseDxf(text) {
         block = null;
         continue;
       }
-      if (section === 'ENTITIES' || (section === 'BLOCKS' && block)) current = { type: value, codes: [] };
+      if (section === 'ENTITIES' || (section === 'BLOCKS' && block) || (section === 'TABLES' && value === 'STYLE'))
+        current = { type: value, codes: [] };
       continue;
     }
     if (section === 'HEADER' && code === 9) {
@@ -100,7 +208,7 @@ export function parseDxf(text) {
     current?.codes.push([code, value]);
   }
   finish();
-  return { entities, blocks, header };
+  return { entities, blocks, styles, header };
 }
 
 const get = (e, code, fallback) => {
@@ -211,6 +319,14 @@ export function mtextPlain(s) {
     .replace(/\\\\/g, '\\');
 }
 
+/** Font family of a text: arial for styles with arial.ttf, else jhenghei (see FAMILY_RATIO). */
+export function textFamily(doc, style, mtext = '') {
+  const font = /\\f([^|;]+)/i.exec(mtext)?.[1] ?? '';
+  if (/mingliu/i.test(font)) return 'mingliu';
+  if (/arial/i.test(font)) return 'arial';
+  return /arial/i.test(doc.styles?.get(String(style ?? 'STANDARD').toUpperCase()) ?? '') ? 'arial' : 'jhenghei';
+}
+
 // ───────── content stream writer ─────────
 const fmt = v => {
   if (!Number.isFinite(v)) throw new Error(`PDF 數值無效：${v}`);
@@ -226,7 +342,7 @@ class Canvas {
     this.style = null;
   }
   setStroke(layer, ltype, ltscale) {
-    const width = (WEIGHTS[layer] ?? DEFAULT_WEIGHT) / this.unitMm;
+    const width = PLOT_LINE_WIDTH;
     const pattern = LINETYPES[ltype?.toUpperCase?.()];
     const dash = pattern ? pattern.map(v => Math.max(Math.abs(v) * ltscale, 0.15 / this.unitMm)) : [];
     const key = `${width}|${dash.join(',')}`;
@@ -252,10 +368,16 @@ class Canvas {
     out.push(mode);
     this.ops.push(out.join(' '));
   }
-  /** Text runs on one baseline: Helvetica for Latin-1, MSung-Light for the rest. */
-  text(str, origin, { height, rotation = 0, widthFactor = 1, halign = 0, valign = 0 }) {
+  /**
+   * Text runs on one baseline, in the family the reference plot used for the style:
+   * arial → Helvetica (Arial metrics); jhenghei → Latin in Helvetica glyphs placed on
+   * Microsoft JhengHei's advances and capital height; mingliu → Times-Roman; Chinese
+   * in the standard CNS1 fonts (MHei-Medium sans, MSung-Light for PMingLiU).
+   */
+  text(str, origin, { height, rotation = 0, widthFactor = 1, halign = 0, valign = 0, family = 'arial' }) {
     if (!str || height <= 0) return;
-    const em = height / CAP_HEIGHT,
+    const em = height / FAMILY_RATIO[family],
+      cjkEm = height / FAMILY_RATIO[family === 'mingliu' ? 'mingliu' : 'jhenghei'],
       runs = [];
     for (const ch of str) {
       const latin = WIN_ANSI(ch),
@@ -263,10 +385,37 @@ class Canvas {
       if (last && last.latin === latin) last.text += ch;
       else runs.push({ latin, text: ch });
     }
-    for (const run of runs)
-      run.width =
-        (run.latin ? this.fonts.latin.widthOfTextAtSize(run.text, em) : [...run.text].length * em) * widthFactor;
-    const total = runs.reduce((s, r) => s + r.width, 0);
+    const helvetica = this.fonts.latin,
+      times = this.fonts.serif;
+    for (const run of runs) {
+      const chars = [...run.text];
+      if (!run.latin) {
+        run.font = family === 'mingliu' ? '/F4' : '/F2';
+        run.size = cjkEm;
+        run.advances = chars.map(() => cjkEm);
+        run.glyphs = [ucs2(run.text)];
+      } else if (family === 'jhenghei') {
+        // Helvetica glyphs with JhengHei's capital height, spaced on JhengHei's advances
+        run.font = '/F1';
+        run.size = (em * JHENGHEI_LATIN_CAP) / HELVETICA_CAP;
+        run.advances = chars.map(ch => ((JHENGHEI_WIDTHS[ch] ?? helvetica.widthOfTextAtSize(ch, 1000)) / 1000) * em);
+        run.glyphs = chars.map(ch => helvetica.encodeText(ch).toString());
+        run.natural = chars.map(ch => helvetica.widthOfTextAtSize(ch, run.size));
+      } else if (family === 'mingliu') {
+        run.font = '/F3';
+        run.size = em * 0.95;
+        run.advances = chars.map(ch => times.widthOfTextAtSize(ch, em) * 0.912);
+        run.glyphs = chars.map(ch => times.encodeText(ch).toString());
+        run.natural = chars.map(ch => times.widthOfTextAtSize(ch, run.size));
+      } else {
+        run.font = '/F1';
+        run.size = em;
+        run.advances = chars.map(ch => helvetica.widthOfTextAtSize(ch, em));
+        run.glyphs = [helvetica.encodeText(run.text).toString()];
+      }
+      run.width = run.advances.reduce((sum, v) => sum + v, 0) * widthFactor;
+    }
+    const total = runs.reduce((sum, r) => sum + r.width, 0);
     const dx = -total * [0, 0.5, 1, 0, 0.5, 0][halign],
       dy = -height * [0, 0, 0.5, 1][valign];
     const a = rad(rotation),
@@ -276,11 +425,15 @@ class Canvas {
     const parts = ['BT'];
     for (const run of runs) {
       const p = [origin[0] + cs * x - sn * dy, origin[1] + sn * x + cs * dy];
-      const font = run.latin ? '/F1' : '/F2';
-      const encoded = run.latin ? this.fonts.latin.encodeText(run.text).toString() : ucs2(run.text);
-      parts.push(
-        `${font} ${fmt(em)} Tf ${fmt(widthFactor * 100)} Tz ${fmt(cs)} ${fmt(sn)} ${fmt(-sn)} ${fmt(cs)} ${fmt(p[0])} ${fmt(p[1])} Tm ${encoded} Tj`,
-      );
+      const matrix = `${fmt(cs)} ${fmt(sn)} ${fmt(-sn)} ${fmt(cs)} ${fmt(p[0])} ${fmt(p[1])} Tm`;
+      if (run.natural)
+        // each glyph stretched to the advance of the plotted font: even spacing, same extent
+        parts.push(
+          `${run.font} ${fmt(run.size)} Tf ${matrix} ${run.glyphs
+            .map((g, i) => `${fmt((run.advances[i] / Math.max(run.natural[i], 1e-9)) * widthFactor * 100)} Tz ${g} Tj`)
+            .join(' ')}`,
+        );
+      else parts.push(`${run.font} ${fmt(run.size)} Tf ${fmt(widthFactor * 100)} Tz ${matrix} ${run.glyphs[0]} Tj`);
       x += run.width;
     }
     parts.push('ET');
@@ -382,16 +535,17 @@ function renderEntities(entities, m, canvas, doc, depth = 0) {
           widthFactor: num(e, 41, 1),
           halign: [0, 1, 2, 0, 1, 0][align[0]] ?? 0,
           valign: align[0] === 4 ? 2 : align[1],
+          family: textFamily(doc, get(e, 7)),
         });
         break;
       }
       case 'MTEXT': {
-        const text = mtextPlain(
-          e.codes
+        const raw = e.codes
             .filter(([c]) => c === 3 || c === 1)
             .map(([, v]) => v)
             .join(''),
-        );
+          text = mtextPlain(raw),
+          family = textFamily(doc, get(e, 7), raw);
         const attach = num(e, 71, 1) - 1,
           height = num(e, 40);
         const dir =
@@ -411,6 +565,7 @@ function renderEntities(entities, m, canvas, doc, depth = 0) {
             height,
             rotation: dir,
             halign: attach % 3,
+            family,
           });
         });
         break;
@@ -614,7 +769,7 @@ function renderHatch(e, m, canvas, layer, ltscale) {
   canvas.style = null;
 }
 
-function drawText(canvas, m, text, at, { height, rotation = 0, widthFactor = 1, halign = 0, valign = 0 }) {
+function drawText(canvas, m, text, at, { height, rotation = 0, widthFactor = 1, halign = 0, valign = 0, family }) {
   const p = apply(m, at),
     s = scaleOf(m),
     mirrored = m[0] * m[3] - m[1] * m[2] < 0;
@@ -625,17 +780,23 @@ function drawText(canvas, m, text, at, { height, rotation = 0, widthFactor = 1, 
     widthFactor,
     halign,
     valign,
+    family,
   });
 }
 
 // ───────── document ─────────
-async function cjkFont(pdf) {
+/**
+ * A standard Traditional Chinese font (Adobe-CNS1, not embedded): MHei-Medium (sans,
+ * for JhengHei) or MSung-Light (serif, for PMingLiU). ASCII CIDs are half width.
+ */
+async function cjkFont(pdf, name) {
+  const sans = name === 'MHei-Medium';
   const descriptor = pdf.context.register(
     pdf.context.obj({
       Type: 'FontDescriptor',
-      FontName: 'MSung-Light',
-      Flags: 6,
-      FontBBox: [-160, -249, 1015, 888],
+      FontName: name,
+      Flags: sans ? 4 : 6,
+      FontBBox: sans ? [-45, -250, 1015, 887] : [-160, -249, 1015, 888],
       ItalicAngle: 0,
       Ascent: 880,
       Descent: -120,
@@ -647,17 +808,18 @@ async function cjkFont(pdf) {
     pdf.context.obj({
       Type: 'Font',
       Subtype: 'CIDFontType0',
-      BaseFont: 'MSung-Light',
+      BaseFont: name,
       CIDSystemInfo: { Registry: PDFString.of('Adobe'), Ordering: PDFString.of('CNS1'), Supplement: 0 },
       FontDescriptor: descriptor,
       DW: 1000,
+      W: [1, 95, 500],
     }),
   );
   return pdf.context.register(
     pdf.context.obj({
       Type: 'Font',
       Subtype: 'Type0',
-      BaseFont: 'MSung-Light-UniCNS-UCS2-H',
+      BaseFont: `${name}-UniCNS-UCS2-H`,
       Encoding: 'UniCNS-UCS2-H',
       DescendantFonts: [descendant],
     }),
@@ -766,8 +928,10 @@ export async function drawingPdf(
   pdf.setTitle(title || 'Drawing');
   pdf.setCreator('PA Copper CAD');
   pdf.setProducer('PA Copper CAD (pdf-lib)');
-  const latin = await pdf.embedFont(StandardFonts.Helvetica);
-  const cjk = await cjkFont(pdf);
+  const latin = await pdf.embedFont(StandardFonts.Helvetica),
+    serif = await pdf.embedFont(StandardFonts.TimesRoman);
+  const cjk = await cjkFont(pdf, 'MHei-Medium'),
+    cjkSerif = await cjkFont(pdf, 'MSung-Light');
   const pages = [];
   if (cover) pages.push({ box: template.cover_box, size: [A4.short, A4.long] });
   pages.push({ box: template.sheet_box, size: [A4.long, A4.short] });
@@ -778,7 +942,7 @@ export async function drawingPdf(
         pdf.context.register(pdf.context.flateStream(await watermarkContent(pdf, page, watermark, appearance))),
       );
     const k = Math.min(size[0] / (box[2] - box[0]), size[1] / (box[3] - box[1]));
-    const canvas = new Canvas({ latin }, k / MM);
+    const canvas = new Canvas({ latin, serif }, k / MM);
     renderEntities(doc.entities, IDENTITY, canvas, doc);
     const content = [
       'q',
@@ -790,6 +954,8 @@ export async function drawingPdf(
     const stream = pdf.context.register(pdf.context.flateStream(content));
     page.node.setFontDictionary(PDFName.of('F1'), latin.ref);
     page.node.setFontDictionary(PDFName.of('F2'), cjk);
+    page.node.setFontDictionary(PDFName.of('F3'), serif.ref);
+    page.node.setFontDictionary(PDFName.of('F4'), cjkSerif);
     page.node.addContentStream(stream);
   }
   // Plain object dictionaries (no object streams): readable by every PDF reader.

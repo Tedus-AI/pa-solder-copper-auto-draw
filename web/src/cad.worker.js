@@ -1,12 +1,18 @@
 import initOpenCascade from 'replicad-opencascadejs';
 import wasmURL from 'replicad-opencascadejs/wasm?url';
-import { setOC, sketchRoundedRectangle, sketchRectangle, makeCylinder, Sketcher, measureVolume, importSTEP } from 'replicad';
+import { setOC, sketchRoundedRectangle, sketchRectangle, makeCylinder, Sketcher, measureVolume, importSTEP, exportSTEP } from 'replicad';
 import {holeCenters} from './hole-corners.js';
 import { calculate, octagon } from './design.js';
 
 let engine;
 const ready = () => engine ??= initOpenCascade({ locateFile: path => path.endsWith('.wasm') ? wasmURL : path }).then(oc => { setOC(oc); return oc; });
 const near = (a, b) => Math.abs(a - b) <= Math.max(.001, Math.abs(b) * .0001);
+// STEP files carry part names and colours (AP214 via XCAF), so CAD opens them coloured:
+// copper in copper, the solder preform in purple.
+const STEP_PARTS = { copper: { name: 'Copper_Coin', color: '#b87333' }, preform: { name: 'Solder_Preform', color: '#8e44ad' } };
+// OpenCascade keeps colours as linear RGB and writes sRGB to STEP: hand it the linear value.
+const linearHex = hex => '#' + [1, 3, 5].map(i => { const c = parseInt(hex.slice(i, i + 2), 16) / 255, l = c <= .04045 ? c / 12.92 : ((c + .055) / 1.055) ** 2.4; return Math.round(l * 255).toString(16).padStart(2, '0'); }).join('');
+const stepOf = items => exportSTEP(items.map(([part, shape]) => ({ shape, name: STEP_PARTS[part].name, color: linearHex(STEP_PARTS[part].color) })), { unit: 'MM' });
 
 self.onmessage = async ({ data: { id, design } }) => {
   const owned = [];
@@ -48,12 +54,18 @@ self.onmessage = async ({ data: { id, design } }) => {
       solids.forEach(s => s.delete());
       const mesh = shape.mesh({ tolerance: .015, angularTolerance: .1 });
       const edges = shape.meshEdges({ tolerance: .015, angularTolerance: .1 });
-      const step = shape.blobSTEP();
+      const step = stepOf([[name, shape]]);
       const restored = keep(await importSTEP(step));
       if (!near(measureVolume(restored), expected)) throw new Error(`${name} STEP 回讀體積不符。`);
-      parts[name] = { mesh, edges, step, stl: shape.blobSTL({ binary: true, tolerance: .05, angularTolerance: .15 }), volume, bounds: shape.boundingBox.bounds };
+      parts[name] = { mesh, edges, step, volume, bounds: shape.boundingBox.bounds };
     }
-    self.postMessage({ id, result: { parts, results: r, verification: 'volume_and_step_roundtrip_passed' } });
+    // Assembly: the preform placed on the main boss top, between the four pads.
+    self.postMessage({ id, status: '正在建立銅塊＋錫片組合 STEP…' });
+    const placed = keep(preform.clone().translate([cx, cy, c.base_thickness + r.boss_lower_height]));
+    const assembly = stepOf([['copper', copper], ['preform', placed]]);
+    const together = keep(await importSTEP(assembly));
+    if (!near(measureVolume(together), parts.copper.volume + parts.preform.volume)) throw new Error('組合 STEP 回讀體積不符。');
+    self.postMessage({ id, result: { parts, assembly: { step: assembly }, results: r, verification: 'volume_and_step_roundtrip_passed' } });
   } catch (error) {
     self.postMessage({ id, error: typeof error === 'object' && error?.message ? error.message : `CAD 建模失敗：${String(error)}` });
   } finally {

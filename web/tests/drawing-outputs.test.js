@@ -22,7 +22,10 @@ import {
   watermarkPlacement,
   mtextPlain,
   dxfString,
+  textFamily,
 } from '../src/dxf-pdf.js';
+import { layoutDxf } from '../src/layout.js';
+import { NOTE_STYLE } from '../src/copper-drawing.js';
 import { dimensionFor, mirroredEdge } from '../src/dimensions.js';
 
 const template = JSON.parse(
@@ -180,7 +183,7 @@ test('drawing PDF: cover + sheet on A4, watermark under the content at 50 %', as
   const raw = Buffer.from(bytes).toString('latin1');
   assert.match(raw, /\/S \/Transparency/);
   assert.match(raw, /\/ca 0\.5/);
-  assert.match(raw, /\/BaseFont \/MSung-Light/);
+  assert.match(raw, /\/BaseFont \/MHei-Medium/);
   // the watermark content stream is the first one of each page: drawn behind the drawing
   for (const page of pdf.getPages()) {
     const contents = page.node.Contents();
@@ -215,4 +218,34 @@ test('E and F can attach to either parallel edge of the base', () => {
   );
   assert.deepEqual(mirroredEdge([1, -2, 3], [5, -2, 3]), { a: [1, 2, 3], b: [5, 2, 3] });
   assert.equal(dimensionFor('copper.hole_diameter', r, null).anchorCandidates, undefined);
+});
+
+test('PDF text plots in the reference fonts: Arial styles, JhengHei for the rest, PMingLiU MTEXT', () => {
+  const doc = parseDxf(copperDrawingText(design(), template, { cover: true, date }));
+  assert.equal(textFamily(doc, 'TEXTSTYLE_2'), 'arial');
+  assert.equal(textFamily(doc, NOTE_STYLE), 'arial');
+  for (const style of ['STANDARD', 'DELTA', 'Arial', undefined])
+    assert.equal(textFamily(doc, style), 'jhenghei', style);
+  assert.equal(textFamily(doc, 'STANDARD', '{\\fPMingLiU|b0|i0|c136|p18;348001J400}'), 'mingliu');
+  // notes use the reference's Arial style; dimensions and labels STANDARD
+  const styleOf = text =>
+    doc.entities
+      .find(e => e.type === 'TEXT' && e.codes.some(([c, v]) => c === 1 && v === text))
+      .codes.find(([c]) => c === 7)[1];
+  assert.equal(styleOf('1.Material: C1100 or C1020'), NOTE_STYLE);
+  assert.equal(styleOf('比例 '), 'STANDARD');
+  const preform = parseDxf(preformDrawingText(design(), template, { cover: false, date }));
+  assert.equal(
+    preform.entities
+      .find(e => e.type === 'TEXT' && e.codes.some(([c, v]) => c === 1 && v === PREFORM_NOTES[1]))
+      .codes.find(([c]) => c === 7)[1],
+    NOTE_STYLE,
+  );
+});
+
+test('Layout DXF: no X/Y coordinate (UCS) icon at the origin', () => {
+  const text = layoutDxf(design());
+  const vport = text.slice(text.indexOf('\nVPORT\n'), text.indexOf('ENDTAB', text.indexOf('\nVPORT\n')));
+  assert.match(vport, /\n74\n0\n75\n/);
+  assert.ok(text.includes('PA_CENTER'), 'the PA centre mark stays');
 });

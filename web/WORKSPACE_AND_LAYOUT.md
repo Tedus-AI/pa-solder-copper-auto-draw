@@ -10,7 +10,7 @@
 
 聚焦PA長／寬的公差欄時，只顯示最大外框虛線及外側公差文字，不另畫 ± 微小線段。SPH下端是PA金屬底座底面，上端是PIN底面，側視基準與示意模型一致。上方尺寸列獨立於模型區；極端放大無空白時保留尺寸列，可按「定位視角」還原。
 
-銅塊、錫片、PCB、PA、E-PAD設計皆可獨立切換；隱藏或分解不影響製造圖檔。PCB為只有PA開窗／角部避空的局部板，不複製銅塊的吊掛孔；所選孔位仍保留於銅塊及Layout設計。E-PAD切換控制參考組裝／Layout的綠漆與開窗示意，不加入3D製造輸出。PA自身形狀及針腳為示意。STEP／STL只有銅塊與錫片。
+銅塊、錫片、PCB、PA、E-PAD設計皆可獨立切換；隱藏或分解不影響製造圖檔。PCB為只有PA開窗／角部避空的局部板，不複製銅塊的吊掛孔；所選孔位仍保留於銅塊及Layout設計。E-PAD切換控制參考組裝／Layout的綠漆與開窗示意，不加入3D製造輸出。PA自身形狀及針腳為示意。STEP只有銅塊、錫片及兩者的組合；Layout、PCB、PA 不輸出 3D。
 
 
 ## 專案與 PA 型號
@@ -104,7 +104,7 @@ SOLDER_MASK與EPAD_OPENING具封閉輪廓及SOLID HATCH，極性明確。V用於
 - **標題欄**：DATE 為出圖當天，USED ON 為專案名稱，描述為 Cu base E*F*總高／Solder preform W*X*Z。原圖的 NET26-2013200A 不帶入。
 - **封面**：預設含封面（還原成第一版，只保留「1.發行圖面」00 列）。REV 01 以後封面標題欄顯示新的 REV，修訂紀錄表的修改說明需另行補上。含封面時封面為 SHEET 1 OF 2、圖面為 2 OF 2；取消勾選「含封面」則只有圖面，SHEET 1 OF 1。勾選狀態會記在這台瀏覽器。
 - **DXF**：R2000、代碼頁 ANSI_950（Big5），與原圖相同；Big5 以外的字元以 `\U+XXXX` 寫入。
-- **PDF**（dxf-pdf.js）：直接由同一份 DXF 文字繪製向量 PDF，封面 A4 直式、圖面 A4 橫式（圖面 1 單位＝1.5 mm），黑色出圖、外形線 0.35 mm、尺寸與文字 0.18 mm。英數字使用 Helvetica，中文使用 Acrobat 與瀏覽器內建的繁中字型 MSung-Light（不內嵌字型檔）。pdf-lib 只在第一次輸出 PDF 時載入。
+- **PDF**（dxf-pdf.js）：直接由同一份 DXF 文字繪製向量 PDF，封面 A4 直式、圖面 A4 橫式（圖面 1 單位＝1.5 mm）。出圖方式比照使用者以 AutoCAD 從原圖轉出的 PDF（有浮水範例.pdf）：全部黑色、所有線條為髮絲線（線寬 0），DELTA 標誌、圖框與文字粗細與原圖相同。文字依 DXF 字型樣式：字型檔為 arial.ttf 的樣式（標題欄、Note）以 Arial 字寬（Helvetica）繪製；其他樣式（尺寸、中文標籤、封面）比照原圖的微軟正黑體——字級比 0.7566、拉丁字依正黑體字寬逐字排列，中文使用繁中黑體 MHei-Medium；封面料號的 PMingLiU 以 Times／MSung-Light 代替。字型不內嵌，由 Acrobat 與瀏覽器提供。與原圖逐字比對：標題欄與 Note 的字級、位置誤差小於 0.03 pt。pdf-lib 只在第一次輸出 PDF 時載入。
 - **浮水印**：勾選「浮水印」後套用「設定 → 浮水印」上傳的 PDF／PNG／JPG。作法比照使用者以 Acrobat 手動加浮水印的範例（有浮水範例.pdf）：取浮水印 PDF 的 ArtBox（圖片為整張）等比縮放到頁面短邊的 80%、置中、不透明度 50%、旋轉 0°，包在透明群組中並放在頁面內容之前繪製，因此位於圖面之下（背景）；與範例逐點比對位置與顏色一致。比例、不透明度、旋轉可在設定中調整。
 - **浮水印存放**（watermark-store.js）：檔案與 watermark.json（檔名、大小、SHA-256、時間、外觀）另存於 Watermark 資料夾，不併入專案資料庫 JSON：SharePoint 為 Thermal-Spec-DB／文件／PA_Copper_CAD/Watermark；本機為設定中所選資料夾（建議選資料庫檔所在的資料夾）下的 Watermark。瀏覽器另保留一份副本供離線輸出；重新讀取時採用最新的一份。
 
@@ -112,12 +112,17 @@ SOLDER_MASK與EPAD_OPENING具封閉輪廓及SOLID HATCH，極性明確。V用於
 
 | 零件 | 檔名 |
 |---|---|
-| 銅塊 | `專案名稱_Copper_Coin_YYYYMMDD`（.dxf 2D 圖面、.pdf、.step、.stl；簡易外形 DXF 為 `_outline.dxf`） |
+| 銅塊 | `專案名稱_Copper_Coin_YYYYMMDD`（.dxf 2D 圖面、.pdf、.step；出圖零件旁的 DXF 鈕另可下載簡易外形 `_outline.dxf`） |
 | 錫片 | `專案名稱_Solder_Preform_YYYYMMDD`（同上） |
 | Layout 綠漆／E-PAD | `專案名稱_Coin_Solder_Masker_YYYYMMDD.dxf`（出圖零件選 E-PAD 後按 DXF） |
+| 組合 3D | `專案名稱_Coin_Solder_Assembly_YYYYMMDD.step`（僅在出圖包，錫片置於中凸台頂面、四個小凸台之間） |
 | 完整出圖包 | `專案名稱_PA_Copper_CAD_YYYYMMDD.zip` |
 
-專案名稱中檔名不允許的字元（`\ / : * ? " < > |`）改為 `_`。專案ID 與專案名稱同列，為本工具專用欄位，不與 AI-Thermal 等其他工具連動。
+專案名稱中檔名不允許的字元（`\ / : * ? " < > |`）改為 `_`。
+
+**STEP**：銅塊與錫片的 STEP 帶零件名稱與顏色（AP214），CAD 開啟即為銅色（#b87333）與紫色（#8e44ad）。
+
+**完整出圖包內容**：兩個零件的 2D 圖面 DXF／PDF 與 STEP、組合 STEP、Layout 綠漆 DXF，以及 report.json（計算結果、驗證與各檔對照）、parameters.yaml（可重新載入的完整設計參數）、creo_job.json 與 creo_runner.py（在已授權 Creo 7 上產生原生參數化 PRT 用）、sha256.json（各檔雜湊，確認檔案未被更動）。STL、簡易外形 DXF、Creo 說明與開源授權文字不放入出圖包（Creo 說明與授權仍在網站「設定 → 說明」）。專案ID 與專案名稱同列，為本工具專用欄位，不與 AI-Thermal 等其他工具連動。
 
 範本 `web/public/drawing/copper-drawing-template.json` 由 `web/scripts/build-drawing-template.py` 從儲存庫根目錄的 `348001J40001.dxf` 產生（需要 ezdxf）；原圖格式更新時重新執行即可：
 

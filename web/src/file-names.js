@@ -2,6 +2,7 @@
 //   copper coin     → 專案名稱_Copper_Coin_日期
 //   solder preform  → 專案名稱_Solder_Preform_日期
 //   Layout 綠漆/E-PAD → 專案名稱_Coin_Solder_Masker_日期
+//   3D assembly       → 專案名稱_Coin_Solder_Assembly_日期 (bundle only)
 // The project name keeps its Chinese text; only characters that Windows and macOS
 // do not allow in file names are replaced by "_".
 
@@ -9,6 +10,7 @@ export const PART_FILE_NAMES = {
   copper: 'Copper_Coin',
   preform: 'Solder_Preform',
   layout: 'Coin_Solder_Masker',
+  assembly: 'Coin_Solder_Assembly',
   bundle: 'PA_Copper_CAD',
 };
 

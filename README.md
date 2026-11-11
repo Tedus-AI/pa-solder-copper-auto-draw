@@ -4,7 +4,7 @@
 
 **[開啟 PA Copper CAD](https://tedus-ai.github.io/pa-solder-copper-auto-draw/)**
 
-以一般 HTML／CSS／JavaScript 建立，透過 GitHub Actions 部署至 GitHub Pages。瀏覽器直接執行 OpenCascade WebAssembly，提供銅塊與錫片 3D 預覽、STEP／STL／DXF、體積扣除錫厚計算與完整圖檔包，不需要 Python 網站主機或 Streamlit。
+以一般 HTML／CSS／JavaScript 建立，透過 GitHub Actions 部署至 GitHub Pages。瀏覽器直接執行 OpenCascade WebAssembly，提供銅塊與錫片 3D 預覽、有顏色的 STEP（含組合 STEP）、DXF／PDF 2D 圖面、體積扣除錫厚計算與完整圖檔包，不需要 Python 網站主機或 Streamlit。
 
 原生參數化 PRT 須在 Creo Parametric 7.0.10.0／Windows 11 使用下載包內的 runner 與真實原生母檔產生，實機驗證尚未完成。網頁不將 STEP 匯入另存視為原生特徵樹。
 
