@@ -341,6 +341,12 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     window.addEventListener('focus', () => {
       if (fileDb.isReady() && !fileDb.hasConflict()) db.persistFile();
     });
+    // Back online: what was saved meanwhile goes to the database folder (a network
+    // drive may have been away) and to SharePoint now, not at the next retry.
+    window.addEventListener('online', () => {
+      if (fileDb.isReady() && !fileDb.hasConflict()) db.persistFile();
+      sp.schedulePush(500);
+    });
     await sp.tryRestore();
   }
   return { start, open, renderLocal, renderSharePoint, loadAiProjects, combobox };
@@ -399,8 +405,13 @@ export function setupProjectCombobox({ input, toggle, list, projects, emptyText,
     input.focus();
   }
   toggle.addEventListener('click', () => (list.hidden ? openList(true) : closeList()));
+  // Typing shows matching projects only; with none, the list (and its hint) stays closed
+  // so it does not cover the toolbar under the field. ▾ always shows it.
   input.addEventListener('input', event => {
-    if (event.isTrusted) openList(false);
+    if (!event.isTrusted) return;
+    showAll = false;
+    if (items().length) openList(false);
+    else closeList();
   });
   input.addEventListener('keydown', event => {
     const count = list.hidden ? 0 : list.querySelectorAll('[role=option]').length;

@@ -294,3 +294,17 @@
 .guide-section-detail polygon{fill:#b14520}
 #guide-dimension-3d{height:44%;min-height:220px}
 @media(max-width:700px){.project-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.project-name-field{display:block}.project-name-field>label{display:block;margin-bottom:3px}}
+/* ───── Version: label beside the brand, "有新版本" button, 設定 → 版本 ───── */
+.app-version{font:600 10px/16px "SFMono-Regular",Consolas,monospace;color:#5d7563;background:#eef3eb;border:1px solid #dbe5d7;border-radius:4px;padding:0 5px;letter-spacing:.2px}
+.app-version:empty{display:none}
+.topbar .update-chip{display:flex;align-items:center;gap:5px;padding:3px 10px;border:1px solid #e6bf8f;border-radius:6px;background:#fff4e6;color:#99531f;font-size:11px;line-height:18px;font-weight:650;white-space:nowrap;cursor:pointer}
+.topbar .update-chip:hover{background:#ffe9cf}
+.update-chip .update-dot{width:6px;height:6px;border-radius:50%;background:var(--orange)}
+.update-chip .update-version{font:600 10px "SFMono-Regular",Consolas,monospace}
+.update-chip .update-action{font-weight:500;color:#b0703d;border-left:1px solid #edcfab;padding-left:6px}
+#settings-deployed[data-state=update]{color:#a8641b}
+#settings-version,#settings-build{font-family:"SFMono-Regular",Consolas,monospace;font-weight:600}
+@media(max-width:700px){.update-chip .update-version,.update-chip .update-action{display:none}.topbar .update-chip{padding:3px 7px}}
+/* ───── Auto-save switch in the project toolbar ───── */
+.autosave-option{display:flex;align-items:center;gap:3px;font-size:10px;color:#4c6944;white-space:nowrap;cursor:pointer;padding:0 2px}
+.autosave-option input{accent-color:#55815d;width:12px;height:12px;margin:0}

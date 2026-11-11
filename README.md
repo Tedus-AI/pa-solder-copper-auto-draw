@@ -8,11 +8,13 @@
 
 原生參數化 PRT 須在 Creo Parametric 7.0.10.0／Windows 11 使用下載包內的 runner 與真實原生母檔產生，實機驗證尚未完成。網頁不將 STEP 匯入另存視為原生特徵樹。
 
+**版本號**：頁首「PA Copper CAD」旁顯示工具版本（例：`v1.10.0`），滑鼠移上去或在「⚙ 設定 → 版本」可看到建置時間與 commit。版本號取自 `web/package.json` 的 `version`：每次合併功能更新提高次版號（1.10 → 1.11），只修錯誤時提高修訂號（1.10.0 → 1.10.1）。建置時另寫出 `version.json`；開著的頁面每 30 分鐘及切回視窗時比對網站上的 `version.json`，網站已發佈新版時頁首出現「有新版本」，先儲存專案再點選即重新整理。版本紀錄：v1.1–v1.9 對應 PR #1–#9，v1.10.0 新增版本號顯示與自動儲存。
+
 網頁原始碼在 `web/`，部署與測試方式見 [DEPLOYMENT.md](DEPLOYMENT.md)。以下保留原始 Python CLI 使用說明。
 
 桌面尺寸工作區支援點選欄位後在3D定位／呼吸標記、銅塊／錫片／PCB／PA／E-PAD顯示開關、六面視角、PA／PCB參考組裝、PA公差到PCB開窗的 Delta／Ampleon 自動連動，以及原規範第9頁的 Layout 綠漆／E-PAD DXF。銅塊與錫片 2D 圖面依公司圖面 348001J40001 的格式出圖（可選含封面），尺寸公差跟隨工具設定；各自有 12 碼料號（前 10 碼對應 PART NO.、後 2 碼對應 REV，可上鎖），並可輸出 2D 圖面 PDF，可選擇套用設定中上傳的浮水印（比照 Acrobat，置於圖面內容之下；浮水印檔另存於資料庫的 Watermark 資料夾）。出圖零件下拉含 E-PAD（Layout 綠漆 DXF）。輸出檔名統一為 專案名稱_Copper_Coin_日期／專案名稱_Solder_Preform_日期／專案名稱_Coin_Solder_Masker_日期。PCB／PA不參與3D出圖；詳細尺寸對應與Layout圖層極性見 [工作區與Layout規格](web/WORKSPACE_AND_LAYOUT.md)。
 
-專案名稱、專案ID（本工具專用）、PA 品牌與 PA 型號同排顯示；專案名稱可從 AI-Thermal 工具的專案清單下拉選擇（只讀）。專案可儲存、另存、載入與刪除，資料庫比照 Thermal-Test-Report-Builder：頁首的 ⚙ 設定可選擇本機資料庫資料夾（可放共用磁碟；每個專案一份 JSON，與 SharePoint 結構相同）與每日自動備份資料夾，並可開啟 SharePoint 雙存檔（Thermal-Spec-DB／文件／PA_Copper_CAD）；頁首左右並排顯示 SharePoint 與本機的寫入狀態。尺寸欄的 Typ. 表示未加公差的設計尺寸。
+專案名稱、專案ID（本工具專用）、PA 品牌與 PA 型號同排顯示；專案名稱可從 AI-Thermal 工具的專案清單下拉選擇（只讀）。專案可儲存、另存、載入與刪除，並預設**自動儲存**（修改後約 2 秒寫入瀏覽器、本機資料庫資料夾與 SharePoint；離線時恢復連線後補傳；新專案輸入專案名稱後才自動建立），資料庫比照 Thermal-Test-Report-Builder：頁首的 ⚙ 設定可選擇本機資料庫資料夾（可放共用磁碟；每個專案一份 JSON，與 SharePoint 結構相同）與每日自動備份資料夾，並可開啟 SharePoint 雙存檔（Thermal-Spec-DB／文件／PA_Copper_CAD）；頁首左右並排顯示 SharePoint 與本機的寫入狀態。尺寸欄的 Typ. 表示未加公差的設計尺寸。
 
 新增「錫厚圖解／計算表」：以目前尺寸逐步呈現容腔減銅凸台、削角後面積與錫厚。容腔的避空面積 Aₒ 採 PCB 開孔實際的四個外側半圓（2πr²，同側重疊時扣除），不再沿用 PDF 第12／13頁只計一個整圓 π(O/2)² 的等效式；預設案例 Z 由 0.3748 改為 0.3859 mm。HSK 說明明列對應位置挖槽、槽深 G＋0.05 mm 與加工公差 ±0.05 mm。
 
