@@ -405,8 +405,13 @@ export function setupProjectCombobox({ input, toggle, list, projects, emptyText,
     input.focus();
   }
   toggle.addEventListener('click', () => (list.hidden ? openList(true) : closeList()));
+  // Typing shows matching projects only; with none, the list (and its hint) stays closed
+  // so it does not cover the toolbar under the field. ▾ always shows it.
   input.addEventListener('input', event => {
-    if (event.isTrusted) openList(false);
+    if (!event.isTrusted) return;
+    showAll = false;
+    if (items().length) openList(false);
+    else closeList();
   });
   input.addEventListener('keydown', event => {
     const count = list.hidden ? 0 : list.querySelectorAll('[role=option]').length;

@@ -430,7 +430,9 @@ async function withDeadline(operation,ms,label){
     await page.locator('#project-save').click();
     assert.match(await page.locator('#project-save-status').textContent(),/已儲存/);
     const savedId=await page.locator('#project-select').inputValue();
-    await page.locator('#project-name').fill('另存副本');await page.locator('#project-save-as').click();
+    await page.locator('#project-name').fill('另存副本');
+    assert.equal(await page.locator('#project-options').isVisible(),false,'typing a name with no matching AI-Thermal project keeps the list closed (it would cover 另存)');
+    await page.locator('#project-save-as').click();
     assert.notEqual(await page.locator('#project-select').inputValue(),savedId);
     await page.locator('#project-delete').click();
     await page.locator('#project-select').selectOption(savedId);await modelReady();
