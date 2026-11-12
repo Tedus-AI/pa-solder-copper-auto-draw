@@ -66,8 +66,16 @@ export async function fetchDeployedInfo(url, fetchImpl = globalThis.fetch) {
 /**
  * Header version label, the 設定 → 版本 section and the "有新版本" button.
  * @param hasUnsavedChanges () => boolean: reloading asks first when the project has unsaved edits
+ * @param beforeReload called right before the page reloads
  */
-export function setupVersionUI({ $, hasUnsavedChanges = () => false, url, fetchImpl, now = () => Date.now() }) {
+export function setupVersionUI({
+  $,
+  hasUnsavedChanges = () => false,
+  beforeReload = () => {},
+  url,
+  fetchImpl,
+  now = () => Date.now(),
+}) {
   const label = versionLabel(),
     build = buildLabel();
   $('app-version').textContent = label;
@@ -115,6 +123,7 @@ export function setupVersionUI({ $, hasUnsavedChanges = () => false, url, fetchI
       !confirm('目前專案有未儲存的修改，重新整理後會遺失。\n\n按「取消」回到工具先儲存；按「確定」直接重新整理。')
     )
       return;
+    beforeReload(); // the question was just asked here; the page's own leave guard stays quiet
     location.reload();
   }
   banner.addEventListener('click', reload);

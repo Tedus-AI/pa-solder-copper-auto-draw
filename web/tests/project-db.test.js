@@ -243,3 +243,16 @@ test('project metadata validates on its own, without a full design', () => {
   assert.throws(() => normalizeProject({ name: '' }), /專案名稱/);
   assert.throws(() => normalizeProject({ name: 'a\nb' }), /單行/);
 });
+
+test('a delete that cannot be written keeps the project and its sync state', () => {
+  const storage = memoryStorage();
+  const db = new ProjectDatabase({ storage });
+  const record = db.save(calculate(design('保留')).design);
+  const before = db.sync.state();
+  storage.blocked = true;
+  assert.throws(() => db.remove(record.id), /瀏覽器儲存失敗/);
+  storage.blocked = false;
+  assert.equal(db.get(record.id).design.project.name, '保留');
+  assert.deepEqual(db.sync.state(), before);
+  assert.equal(db.activeId(), record.id);
+});

@@ -112,6 +112,14 @@ const zero = new Set([
 const check = (condition, message) => {
   if (!condition) throw new Error(message);
 };
+// Notes that hold for every design. calculate() lists them first in `warnings`;
+// the workspace raises only the warnings a particular design adds to them.
+export const STANDING_NOTES = Object.freeze([
+  '銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。',
+  '未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。',
+  '試片增減量固定 ±0.15 mm；錫片製造公差 ±0.02 mm 另行設定。',
+  '錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。',
+]);
 export const ceilTenth = v => Math.ceil(v * 10 - Number.EPSILON * Math.abs(v) * 10) / 10;
 // Fixed process capability from PPT p8. It is not a user-entered dimensional tolerance.
 export const PLACEMENT_ALLOWANCE = 0.066;
@@ -386,12 +394,7 @@ export function calculate(input) {
   const openingChain = openingRecommendation(d),
     clearance = (t.chamfer - 2 * c.pad_size) / Math.SQRT2,
     analysis = gapAnalysis(d);
-  const warnings = [
-    '銅塊 E/F 由 thermal／RF 設計定義，40 × 30 mm 僅為示範外形。',
-    '未指定的公差在極限分析中暫按 0；請解鎖填入製造規格後再評估。',
-    '試片增減量固定 ±0.15 mm；錫片製造公差 ±0.02 mm 另行設定。',
-    '錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。',
-  ];
+  const warnings = [...STANDING_NOTES];
   if (footprint.breakouts) warnings.push('吊掛孔已穿破圓角／外緣；預覽與出圖保留實際缺口。');
   if (footprint.outside_holes) warnings.push('有吊掛孔刀具圓未切到圓角基座，實際模型不會出現該孔。');
   if (footprint.tangent_holes) warnings.push('孔與基座外形恰好相接；顯示實際輪廓，出圖仍會驗證單一實體。');
