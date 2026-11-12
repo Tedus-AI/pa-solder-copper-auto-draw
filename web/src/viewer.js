@@ -69,8 +69,18 @@ export class CADViewer {
   }
 
   requestRender(){this.needsRender=true;}
+  cameraState(){const c=this.camera;return{position:c.position.clone(),up:c.up.clone(),target:this.controls.target.clone(),zoom:c.zoom,frustum:[c.left,c.right,c.top,c.bottom]};}
+  restoreCamera(state){
+    const c=this.camera;c.position.copy(state.position);c.up.copy(state.up);this.controls.target.copy(state.target);
+    [c.left,c.right,c.top,c.bottom]=state.frustum;c.zoom=state.zoom;c.lookAt(state.target);c.updateProjectionMatrix();c.updateMatrixWorld(true);
+    this.controls.update();this.markView('custom');this.updateAnnotation();
+  }
   setDesign(r,layout,parts=null) {
+    // A view the user has orbited, panned or zoomed is kept: new numbers, or the
+    // export model arriving from the worker, must not snap the camera back to fit.
+    const kept=this.renderer&&this.r&&this.el.dataset.cameraView==='custom'?this.cameraState():null;
     this.r=r;this.layout=layout;this.parts=parts;this.renderModels();
+    if(kept)this.restoreCamera(kept);
     if(this.key)this.selectDimension(this.key,false,{tolerance:this.toleranceFocus===this.key});
   }
   mesh(geometry,color,opacity=1,component='copper') {

@@ -244,10 +244,19 @@ export class ProjectDatabase {
   }
   remove(id) {
     const doc = this.ensure();
-    if (!doc.projects[id]) return;
+    const previous = doc.projects[id];
+    if (!previous) return;
+    const sync = clone(doc.sp_sync);
     delete doc.projects[id];
     this.markDeleted(id);
-    this.writeCache();
+    try {
+      this.writeCache();
+    } catch (error) {
+      // Not written: the project stays, in memory as on disk (as save() does).
+      doc.projects[id] = previous;
+      doc.sp_sync = sync;
+      throw error;
+    }
     if (this.activeId() === id) this.setActiveId(null);
     this.persistFile();
   }

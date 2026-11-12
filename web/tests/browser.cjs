@@ -54,6 +54,8 @@ async function withDeadline(operation,ms,label){
       await fsPage.close();
     }
     await page.addInitScript(()=>{try{localStorage.setItem('pa-copper-cad.auto-fullscreen','off');}catch{}});
+    // Deleting a saved project and leaving with edits auto-save will not keep both ask first: answer yes.
+    page.on('dialog', dialog => dialog.accept().catch(() => {}));
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') console.error('Browser console:', m.text()); });
     await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });
@@ -61,7 +63,11 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#error').isVisible(), false, await page.locator('#error').textContent());
     assert.equal(await page.locator('#metric-z').textContent(), '0.385851');
     assert.equal(await page.locator('#metric-l').textContent(), '0.4800');
-    assert.equal(await page.locator('.metrics').isVisible(),false);assert.doesNotMatch(await page.locator('body').textContent(),/CuH/);assert.equal(await page.locator('#preform-chamfer').inputValue(),'3.40');assert.equal(await page.locator('#preform-trial_delta').inputValue(),'0.15');for(const id of ['preform-chamfer','preform-trial_delta','preform-thickness_override'])assert.equal(await page.locator(`#${id}`).getAttribute('aria-readonly'),'true');
+    assert.equal(await page.locator('.metrics').isVisible(),true,'result tiles are part of the workspace');
+    // The dimension dock is always there (idle hint), so picking a dimension never resizes the canvas; no design warnings by default.
+    assert.equal(await page.locator('#dimension-label').isVisible(),true);assert.equal(await page.locator('#dimension-label').getAttribute('data-active'),'false');
+    assert.equal(await page.locator('#alerts').isVisible(),false);assert.equal(await page.locator('#kpi-gap').textContent(),'0.0465');
+    {const before=await page.locator('#viewer').boundingBox();await page.locator('#copper-base_length').focus();assert.equal(await page.locator('#dimension-label').getAttribute('data-active'),'true');assert.deepEqual(await page.locator('#viewer').boundingBox(),before,'selecting a dimension keeps the canvas size');await page.locator('#dimension-clear').click();assert.equal(await page.locator('#dimension-label').getAttribute('data-active'),'false');await page.locator('#tab-assembly').click();}assert.doesNotMatch(await page.locator('body').textContent(),/CuH/);assert.equal(await page.locator('#preform-chamfer').inputValue(),'3.40');assert.equal(await page.locator('#preform-trial_delta').inputValue(),'0.15');for(const id of ['preform-chamfer','preform-trial_delta','preform-thickness_override'])assert.equal(await page.locator(`#${id}`).getAttribute('aria-readonly'),'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-ready'), 'true');
     assert.equal(await page.locator('#viewer').getAttribute('data-reference-parts'), 'pcb,pa');
     // 3D defaults: every part shown and solid; the background grid is on and can be hidden.
@@ -434,7 +440,10 @@ async function withDeadline(operation,ms,label){
     const oldCuh=Number(await page.locator('#metric-l').textContent());
     await page.locator('#package-support_height').fill('1.47');
     await page.waitForFunction(v=>Math.abs(Number(document.getElementById('metric-l').textContent)-v)<1e-6,oldCuh+.1);
-    await page.locator('#generate').click();
+    // No click on 建立出圖模型: the export model is rebuilt on its own once the edits pause.
+    assert.equal(await page.locator('#download-zip').isDisabled(),true,'an edit makes the exports wait for the rebuilt model');
+    await page.waitForFunction(()=>document.getElementById('preview-state').dataset.state==='ready',null,{timeout:120000});
+    assert.equal(await page.locator('#generate').textContent(),'重新建立');
     await page.waitForFunction(()=>!document.getElementById('download-zip').disabled||!document.getElementById('error').hidden,null,{timeout:120000});
     assert.equal(await page.locator('#error').isVisible(),false,await page.locator('#error').textContent());
     const linkedDownload=page.waitForEvent('download');await page.locator('#download-zip').click();

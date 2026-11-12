@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, calculate, ceilTenth, nativeJob, octagon } from '../src/design.js';
+import { defaults, calculate, ceilTenth, nativeJob, octagon, STANDING_NOTES } from '../src/design.js';
 import { drawing } from '../src/dxf.js';
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b}`);
 
@@ -131,4 +131,14 @@ test('locked trial needs an ISO 8601 confirmation time and tolerance pairs may c
 test('hole diameter must stay below half of the short base side', () => {
   const d = structuredClone(defaults); d.copper.hole_diameter = 15;
   assert.throws(() => calculate(d), /短邊的一半/);
+});
+
+test('standing notes come first; a design adds its own warnings after them', () => {
+  const base = calculate(defaults).warnings;
+  assert.deepEqual(base, [...STANDING_NOTES]);
+  const tight = structuredClone(defaults);
+  tight.pcb = { ...tight.pcb, opening_mode: 'manual', opening_length: 20.7 };
+  const warnings = calculate(tight).warnings;
+  assert.deepEqual(warnings.slice(0, STANDING_NOTES.length), [...STANDING_NOTES]);
+  assert.ok(warnings.slice(STANDING_NOTES.length).some(w => /干涉/.test(w)));
 });

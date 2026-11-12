@@ -1,9 +1,10 @@
 import './style.css';
+import './guide.css';
 import { zipSync, strToU8 } from 'fflate';
-import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject } from './design.js';
+import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject, STANDING_NOTES } from './design.js';
 import { toleranceDefaults, getTolerance, toleranceText, toleranceSource, toleranceSuffix } from './tolerances.js';
 import { faceViews } from './camera-views.js';
-import { formatDimension } from './dimension-format.js';
+import { formatDimension, dimensionSpecs } from './dimension-format.js';
 import { drawing } from './dxf.js';
 import { layoutGeometry, layoutDxf } from './layout.js';
 import { copperDrawingText, encodeDxf, DRAWING_TEMPLATE_PATH } from './copper-drawing.js';
@@ -24,7 +25,7 @@ import { setupFullscreen } from './fullscreen.js';
 import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAutosavePreference } from './autosave.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
-let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer;
+let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer, buildTimer;
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial(),partNumbers=emptyPartNumbers();
 const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 // Export buttons follow one state: the verified CAD model (STEP, outline DXF, bundle),
@@ -76,11 +77,6 @@ document.addEventListener('scroll',()=>{
 document.addEventListener('keydown',event=>{if(event.key==='Escape')hideFormula();});document.addEventListener('pointerdown',event=>{if(!event.target.closest('.formula-help')&&!formulaTooltip.contains(event.target))hideFormula();});
 
 $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
-// Compact visible labels retain the full quantity name in their formula help.
-for(const[id,label]of [['metric-z','錫片厚度 Z ='],['metric-model','模型 Z ='],['metric-volume','錫量 V₁ =']])$(id).parentElement.querySelector('span').firstChild.textContent=label;
-const toleranceLegend=$('tolerance-status').parentElement.querySelector('small');toleranceLegend.title=toleranceLegend.textContent;toleranceLegend.textContent='−／＋偏差；* 原資料未指定，空白暫按 0';
-document.querySelector('.tolerance-toolbar').title=toleranceLegend.title;
-
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
   for(const component of ['copper','preform','pcb','pa','epad'])$(`ref-${component}`).checked=refs[component];
@@ -88,8 +84,9 @@ const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   $('reference-note').textContent=mode==='assembly'?'PCB／PA 僅位置參考，不參與3D出圖':mode==='layout'?'綠色＝綠漆覆蓋；灰色＝E-PAD開窗，單獨輸出Layout DXF':'目前零件的3D出圖預覽';
 },dimension=>{
   document.querySelectorAll('.dimension-active').forEach(el=>el.classList.remove('dimension-active'));
-  $('dimension-label').hidden=!dimension;
-  if(dimension){
+  $('dimension-label').dataset.active=String(!!dimension);
+  if(!dimension){$('dimension-title').textContent=DOCK_HINT;$('dimension-context').textContent='';}
+  else{
     const [group,key]=dimension.key.split('.');
     const title=fields[group]?.[1]?.[key]||dimension.key;
     $('dimension-title').textContent=`${title} · ${dimension.label}`;
@@ -98,6 +95,9 @@ const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
   }
 });
 
+// The dock above the 3D view is always shown, so selecting a dimension never resizes the canvas.
+const DOCK_HINT='點選左側任一尺寸或公差 → 在 3D 模型上定位';
+$('dimension-title').textContent=DOCK_HINT;
 const fieldPath=(group,key)=>`${group}.${key}`;
 const inputFor=path=>$(path.replace('.','-'));
 const titleFor=path=>{const[group,key]=path.split('.');return fields[group]?.[1]?.[key]||path;};
@@ -107,6 +107,12 @@ const hasPath=path=>allPaths.includes(path);
 const sourceFor=path=>toleranceDefaults[path]?.source||'未指定';
 const compactCaptions={'boss.center_from_left':'距左邊 Xc','boss.center_from_bottom':'距下邊 Yc','preform.thickness_override':'選定錫厚 Z','stack.board_solder':'銅塊／PCB 錫厚 B'};
 const unknownTolerance=path=>/未指定|未提供|unknown/i.test(sourceFor(path));
+// "基座長度 E" → name 基座長度 + symbol E: the symbol is the one used on the drawing and in the 3D callout.
+function captionParts(path,title){
+  const text=compactCaptions[path]||title,symbol=dimensionSpecs[path]?.name;
+  if(symbol&&text.endsWith(' '+symbol))return[text.slice(0,-symbol.length-1),symbol];
+  return[text,symbol&&symbol.length<=6?symbol:''];
+}
 const uiGroups=[
   {id:'package',title:'PA 封裝',paths:groupPaths('package'),open:true},
   {id:'pcb',title:'PCB 開孔',paths:groupPaths('pcb'),open:true},
@@ -123,10 +129,11 @@ for(const group of uiGroups){
   const details=document.createElement('details');details.className='control-group';details.open=group.open;details.dataset.group=group.id;
   const summary=document.createElement('summary');summary.textContent=group.title;details.append(summary);
   const grid=document.createElement('div');grid.className='field-grid tolerance-grid';
-  const head=document.createElement('div');head.className='dimension-head';head.innerHTML='<span>尺寸 · mm</span><span title="設計尺寸（Typ.）：未加上下公差的設計值">Typ.</span><span>− 公差</span><span>＋ 公差</span>';grid.append(head);
+  const head=document.createElement('div');head.className='dimension-head';head.innerHTML='<span>尺寸</span><span title="設計尺寸（Typ.）：未加上下公差的設計值">Typ.</span><span title="下偏差">−</span><span title="上偏差">＋</span>';grid.append(head);
   for(const path of group.paths){
     const[g,key]=path.split('.'),title=titleFor(path),row=document.createElement('div');row.className='dimension-row';row.dataset.dimension=path;
-    const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.title=title;const captionText=document.createElement('span');captionText.className='dimension-caption';captionText.textContent=(compactCaptions[path]||title).replace(/ ±$/,'')+' =';caption.append(captionText);
+    const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.title=title;const[captionName,symbol]=captionParts(path,title);const captionText=document.createElement('span');captionText.className='dimension-caption';captionText.textContent=captionName;caption.append(captionText);
+    if(symbol){const chip=document.createElement('span');chip.className='dimension-symbol';chip.textContent=symbol;caption.append(chip);}
     const source=document.createElement('span');source.className='tolerance-source'+(unknownTolerance(path)?' unspecified':'');source.textContent=unknownTolerance(path)?'*':'·';source.title=unknownTolerance(path)?'資料未指定公差；分析暫按 0，解鎖後可手動輸入。':sourceFor(path);caption.append(source);row.append(caption);
     if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom','preform.chamfer','preform.trial_delta'].includes(path))formulaHelp(caption,path,title);
     const input=document.createElement('input');input.type='number';input.className='nominal-input';input.name=path;input.id=path.replace('.','-');
@@ -142,8 +149,8 @@ for(const group of uiGroups){
     grid.append(row);
   }
   details.append(grid);
-  if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表 ↗';details.append(button);
-    const trials=document.createElement('div');trials.className='trial-selection';trials.innerHTML='<div id="trial-candidates" class="trial-candidates"></div><label for="trial-choice">錫片厚度驗證後選定</label><div class="trial-confirm"><select id="trial-choice" aria-label="錫片厚度驗證後選定"></select><button id="trial-lock" type="button" aria-pressed="false" title="鎖定此案的驗證結果">🔓</button></div><p id="trial-result-status" aria-live="polite"></p>';const selectedRow=grid.querySelector('[data-dimension="preform.thickness_override"]');const toleranceText=document.createElement('span');toleranceText.id='thickness-tolerance-text';toleranceText.className='tolerance-text';toleranceText.title='錫片厚度 Z 的製造公差；按「解鎖公差」可修改上下偏差';selectedRow.append(toleranceText);trials.append(selectedRow);details.append(trials);}
+  if(group.id==='preform'){const button=document.createElement('button');button.id='calculation-guide-open';button.type='button';button.className='guide-launch';button.textContent='錫厚圖解／計算表';details.append(button);
+    const trials=document.createElement('div');trials.className='trial-selection';trials.innerHTML='<div id="trial-candidates" class="trial-candidates"></div><label for="trial-choice">錫片厚度驗證後選定</label><div class="trial-confirm"><select id="trial-choice" aria-label="錫片厚度驗證後選定"></select><button id="trial-lock" class="lock-button" type="button" aria-pressed="false" aria-label="鎖定試片驗證結果" title="鎖定此案的驗證結果"></button></div><p id="trial-result-status" aria-live="polite"></p>';const selectedRow=grid.querySelector('[data-dimension="preform.thickness_override"]');const toleranceText=document.createElement('span');toleranceText.id='thickness-tolerance-text';toleranceText.className='tolerance-text';toleranceText.title='錫片厚度 Z 的製造公差；按「解鎖公差」可修改上下偏差';selectedRow.append(toleranceText);trials.append(selectedRow);details.append(trials);}
 
   if(group.id==='copper'){const box=document.createElement('fieldset');box.className='hole-selection';box.innerHTML='<legend>吊掛孔角位（俯視，可複選）</legend>'+[['top_left','左上'],['top_right','右上'],['bottom_left','左下'],['bottom_right','右下']].map(([key,label])=>`<label><input type="checkbox" data-hole-corner="${key}">${label}</label>`).join('');details.append(box);}
   if(group.id==='pcb'){
@@ -175,11 +182,11 @@ const upper=document.createElement('div');upper.className='control-region upper-
 controlColumns[0].append(groupPanels.get('package'),groupPanels.get('stack'));controlColumns[1].append(groupPanels.get('pcb'));upper.append(...controlColumns);
 const lower=document.createElement('div');lower.className='control-region lower-controls';lower.append(groupPanels.get('preform'),groupPanels.get('layout'));
 $('fields').replaceChildren(upper,copperPanel,lower);
-for(const[id,label]of [['metric-l','中凸台總高'],['metric-z','計算錫厚'],['metric-model','模型錫厚'],['metric-volume','所需錫量']])formulaHelp($(id).parentElement.querySelector('span'),id,label);
-for(const[id,label]of [['v-cavity','容腔體積'],['v-boss','凸台體積'],['v-area','錫片面積'],['trials','三款試片厚度']]){const button=formulaHelp(null,id,label);$(id).insertAdjacentElement('afterend',button);}
+for(const[id,label]of [['metric-l','中凸台總高'],['metric-z','計算錫厚'],['metric-model','模型錫厚'],['metric-volume','所需錫量'],['v-area','錫片面積']])formulaHelp($(id).closest('article').querySelector('.kpi-label'),id,label);
+for(const[id,label]of [['v-cavity','容腔體積'],['v-boss','凸台體積'],['trials','三款試片厚度']]){const button=formulaHelp(null,id,label);$(id).insertAdjacentElement('afterend',button);}
 function updateToleranceLock(){
   document.querySelectorAll('.tolerance-input').forEach(input=>{input.readOnly=!tolerancesUnlocked;input.setAttribute('aria-readonly',String(!tolerancesUnlocked));});
-  $('tolerance-unlock').textContent=tolerancesUnlocked?'鎖定公差':'解鎖公差';$('tolerance-unlock').setAttribute('aria-pressed',String(tolerancesUnlocked));
+  $('tolerance-unlock').textContent=tolerancesUnlocked?'鎖定公差':'解鎖公差';$('tolerance-unlock').title=tolerancesUnlocked?'公差欄位可編輯；按下重新鎖定':'公差預設鎖定以免誤改；按下後可編輯 −／＋ 偏差';$('tolerance-unlock').setAttribute('aria-pressed',String(tolerancesUnlocked));
   $('tolerance-status').textContent=tolerancesUnlocked?'可修改上下公差':'公差已鎖定';
   $('design-form').classList.toggle('tolerances-unlocked',tolerancesUnlocked);
 }
@@ -230,8 +237,18 @@ function syncLinkedFields(d){
   inputFor('preform.thickness_override').readOnly=true;inputFor('preform.thickness_override').setAttribute('aria-readonly','true');
   return d;
 }
-function status(text){$('status').textContent=text;}
+function status(text){$('status').textContent=text;$('status').title=text;}
 function error(message){$('error').textContent=message;$('error').hidden=!message;}
+$('error').addEventListener('click',()=>error(''));
+// One build state drives the status pill, the build button and the export buttons' context:
+// pending (preview newer than the export model) · building · ready (verified) · invalid (input error).
+const BUILD_LABELS={pending:['即時預覽 · 出圖待更新','建立出圖模型'],building:['建立出圖模型中…','建立中…'],ready:['出圖模型已驗證','重新建立'],invalid:['輸入無效 · 保留上次有效示意','建立出圖模型']};
+function setBuildState(state){
+  const[pill,button]=BUILD_LABELS[state];
+  $('preview-state').textContent=pill;$('preview-state').dataset.state=state;
+  $('generate').textContent=button;$('generate').dataset.state=state;$('generate').setAttribute('aria-busy',String(state==='building'));
+  document.body.classList.toggle('ready',state==='ready');$('viewer').dataset.ready=String(state==='ready');
+}
 function layoutFor(r){
   const c=r.design.copper,b=r.design.pcb;
   const key=JSON.stringify([c.base_length,c.base_width,c.corner_radius,c.hole_diameter,c.hole_edge_offset,c.hole_corners,b.opening_length,b.opening_width,b.relief_diameter,r.boss_center,r.design.layout]);
@@ -244,12 +261,23 @@ function refreshPreview(showError=false){
     refreshExportButtons();$('viewer').dataset.previewValid='true';
     $('model-size').textContent=[['E',r.design.copper.base_length],['F',r.design.copper.base_width],['G',r.design.copper.base_thickness]].map(([name,value])=>formatDimension(name,value)).join(' · ');
     return draft;
-  }catch(e){draft=null;viewer.clearAnnotation();$('preview-state').textContent='輸入無效 · 保留上次有效示意';refreshExportButtons();$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
+  }catch(e){draft=null;viewer.clearAnnotation();if(!busy)setBuildState('invalid');refreshExportButtons();$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
 }
 function invalidate(){
   revision++;result=null;error('');refreshExportButtons();
-  document.body.classList.remove('ready');$('viewer').dataset.ready='false';$('preview-state').textContent='即時預覽 · 出圖待更新';
-  clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；按「建立出圖模型」後下載3D零件');},140);
+  if(!busy)setBuildState('pending');
+  clearTimeout(previewTimer);previewTimer=setTimeout(()=>{if(refreshPreview())status('預覽已更新；出圖模型將自動重建');},140);
+  // The export model is rebuilt on its own once the edits pause, so the download
+  // buttons come back without a trip to the build button.
+  clearTimeout(buildTimer);buildTimer=setTimeout(autoBuild,AUTO_BUILD_DELAY_MS);
+}
+const AUTO_BUILD_DELAY_MS=1100;
+function autoBuild(){
+  if(result)return;
+  const current=draft??refreshPreview();
+  // A stale trial needs a decision (unlock and re-verify); an invalid input is reported in the status line.
+  if(!current||$('viewer').dataset.previewValid!=='true'||current.results.trial_status==='stale')return;
+  submitProjectModel();
 }
 
 // Only this controller knows about the browser repository. CAD calculations
@@ -330,6 +358,8 @@ $('project-select').addEventListener('change',()=>{
 });
 $('project-delete').addEventListener('click',()=>{
   if(!activeProjectId)return;
+  const shared=[localFile.isReady()&&'本機資料庫資料夾',spSync.isEnabled()&&'SharePoint'].filter(Boolean);
+  if(!confirm(`刪除已儲存的專案「${$('project-name').value.trim()}」？\n\n${shared.length?`${shared.join('與')}中的記錄也會刪除，同事將看不到這個專案。`:'此瀏覽器中的記錄會刪除。'}畫面上的參數會保留，可再按「儲存」重新建立。`))return;
   autoSaver.cancel();deletedName=$('project-name').value.trim();
   try{projectStore.remove(activeProjectId);activeProjectId=null;refreshProjectList();projectMessage('已刪除記錄，畫面內容保留');}
   catch(e){projectMessage(e.message,true);}
@@ -340,19 +370,24 @@ $('autosave').checked=readAutosavePreference();
 $('autosave').addEventListener('change',()=>{writeAutosavePreference($('autosave').checked);if(projectDirty)markDirty();else autoSaver.cancel();});
 window.addEventListener('pagehide',()=>autoSaver.flush());
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')autoSaver.flush();});
-$('design-form').addEventListener('input',event=>{
-  if(event.target.id==='project-select'||event.target.id==='autosave')return;
-  if(['project-name','project-id','pa-brand','pa-model'].includes(event.target.id)){
-    try{syncProjectMetadata();markDirty();}
-    catch(e){projectMetadataValid=false;refreshExportButtons();projectMessage(e.message,true);}
-    return;
-  }
-  invalidate();markDirty();
+// Project identity (header): metadata only, the verified CAD model stays valid.
+document.querySelector('.project-fields').addEventListener('input',()=>{
+  try{syncProjectMetadata();markDirty();}
+  catch(e){projectMetadataValid=false;refreshExportButtons();projectMessage(e.message,true);}
+});
+$('design-form').addEventListener('input',()=>{invalidate();markDirty();});
+// A focused number field must not change while the panel is scrolled with the wheel.
+$('design-form').addEventListener('wheel',event=>{if(event.target.type==='number'&&document.activeElement===event.target)event.target.blur();},{passive:true});
+// Leaving with edits that auto-save will not keep (auto-save off, or a deleted record) asks first.
+let leaving=false;
+window.addEventListener('beforeunload',event=>{
+  if(leaving||!projectDirty||!['off','deleted'].includes(saveMode()))return;
+  event.preventDefault();event.returnValue='';
 });
 $('pcb-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('pcb-rule').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('boss-size-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
-$('boss-center').addEventListener('click',()=>{inputFor('boss.center_from_left').value=Number(inputFor('copper.base_length').value)/2;inputFor('boss.center_from_bottom').value=Number(inputFor('copper.base_width').value)/2;invalidate();refreshPreview(true);});
+$('boss-center').addEventListener('click',()=>{inputFor('boss.center_from_left').value=Number(inputFor('copper.base_length').value)/2;inputFor('boss.center_from_bottom').value=Number(inputFor('copper.base_width').value)/2;invalidate();refreshPreview(true);markDirty();});
 $('tolerance-unlock').addEventListener('click',()=>{tolerancesUnlocked=!tolerancesUnlocked;updateToleranceLock();});
 $('design-form').addEventListener('focusin',event=>{
   if(event.target.type==='number'){
@@ -374,15 +409,18 @@ $('view-grid').addEventListener('click',()=>{viewer.setGridVisible(!viewer.grid?
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
 $('calculation-guide-open').addEventListener('click',showCalculationGuide);
+document.addEventListener('pointerdown',event=>{if($('alerts').open&&!$('alerts').contains(event.target))$('alerts').open=false;});
 $('help-open').addEventListener('click',()=>{$('settings-dialog').close();$('help-dialog').showModal();});
 $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
 function renderTrial(r){
   const labels=['下','中','上'];$('trial-candidates').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('span');el.textContent=`${labels[i]} ${v.toFixed(2)}`;el.classList.toggle('selected',trialChoices[i]===trialRecord.choice);return el;}));
   $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(2)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked;
-  $('trial-lock').textContent=trialRecord.locked?'🔒':'🔓';$('trial-lock').setAttribute('aria-pressed',String(trialRecord.locked));$('trial-lock').title=trialRecord.locked?'解鎖後重新選定試片':'鎖定並儲存此案的驗證結果';
+  $('trial-lock').setAttribute('aria-pressed',String(trialRecord.locked));$('trial-lock').title=trialRecord.locked?'解鎖後重新選定試片':'鎖定並儲存此案的驗證結果';
   $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(2)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(2)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
   document.querySelector('.trial-selection').dataset.status=r.trial_status;
+  const trialTile=$('kpi-trial-state');trialTile.dataset.status=r.trial_status;
+  trialTile.textContent=r.trial_status==='stale'?'尺寸已變更 · 需重新驗證':`${labels[trialChoices.indexOf(trialRecord.choice)]}試片 · ${r.trial_status==='locked'?'已鎖定':'未鎖定'}`;
   inputFor('preform.thickness_override').value=r.model_thickness.toFixed(2);
   const zTolerance=toleranceSuffix(r.design,'preform.thickness_override');$('thickness-tolerance-text').textContent=zTolerance?`${zTolerance} mm`:'公差未指定';
 }
@@ -405,14 +443,20 @@ $('trial-lock').addEventListener('click',()=>{
 function renderMetrics(r){
   renderTrial(r);
   for(const[id,v,digits]of [['metric-l',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
-  $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ')+' mm';
-  $('warnings').replaceChildren(...r.warnings.map(message=>{const li=document.createElement('li');li.textContent=message;return li;}));
+  $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ');
+  $('kpi-boss-lower').textContent=r.boss_lower_height.toFixed(4);
+  const item=message=>{const li=document.createElement('li');li.textContent=message;return li;};
+  $('warnings').replaceChildren(...r.warnings.map(item));
+  // Standing notes stay in the help dialog; what this design triggers is raised next to the build status.
+  const alerts=r.warnings.filter(message=>!STANDING_NOTES.includes(message));
+  $('alerts').hidden=!alerts.length;if(!alerts.length)$('alerts').open=false;
+  $('alerts-count').textContent=alerts.length;$('alerts-list').replaceChildren(...alerts.map(item));
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
   const maximum=r.pa_envelope?[r.pa_envelope.max_length,r.pa_envelope.max_width]:r.opening_chain.maximum;
-  $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append('；');$('package-derived').append(formatDimension(index?'PA(Wmax)':'PA(Lmax)',value));formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
+  $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append(' · ');$('package-derived').append(`${index?'Wmax':'Lmax'} = ${value.toFixed(3)} mm`);formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
   $('copper-derived').textContent=formatDimension('HSK 槽深',r.heatsink_depth,{tolerance:'±0.05'});formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');
-  $('stack-derived').textContent=`L = C + 0.1 + 0.1 − SPH − 0.3 + K = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
-  $('boss-derived').textContent=`中凸台下段高 = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(`；中凸台總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
+  $('stack-derived').textContent=`中凸台總高 L = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
+  $('boss-derived').textContent=`下段 = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(` · 總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
   $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} ${formatDimension('M',r.recommended_opening[0])}；${formatDimension('N',r.recommended_opening[1])}（${r.design.pcb.opening_rule==='delta'?'Delta':'Ampleon'}）`;
   const gaps=r.gap_analysis;
   if(gaps){
@@ -422,6 +466,9 @@ function renderMetrics(r){
     $('gap-state').textContent=gaps.overlap?'可能干涉':'尺寸範圍';$('gap-state').classList.toggle('interference',gaps.overlap);
     $('gap-assumptions').textContent='PA／PCB 開窗固定同心。單位 mm。';
     $('gap-analysis').dataset.interference=String(gaps.overlap);
+    const tile=$('kpi-gap').closest('article');tile.dataset.state=gaps.overlap?'interference':'clear';
+    $('kpi-gap').textContent=Math.min(gaps.x.min,gaps.y.min).toFixed(4);
+    $('kpi-gap-detail').textContent=gaps.overlap?`可能干涉 · X ${gaps.x.min.toFixed(4)} · Y ${gaps.y.min.toFixed(4)}`:`X ${gaps.x.min.toFixed(4)} · Y ${gaps.y.min.toFixed(4)}`;
   }
   for(const path of allPaths){const row=inputFor(path).closest('.dimension-row'),source=toleranceSource(r.design,path),manual=source==='手動設定';row.title=`${titleFor(path)}；公差 ${toleranceText(r.design,path)}；來源：${source}`;row.querySelector('.tolerance-source').title=manual?`手動設定${unknownTolerance(path)?'／原資料未指定':'／原始來源：'+sourceFor(path)}`:unknownTolerance(path)?'原資料未指定公差；分析暫按 0，解鎖後可輸入。':sourceFor(path);for(const input of row.querySelectorAll('.tolerance-input'))input.title=`${source}${manual&&unknownTolerance(path)?'／原資料未指定':''}；${input.dataset.toleranceSide==='minus'?'下':'上'}偏差（輸入非負值）`;}
   renderFormulaHelp(r);
@@ -487,22 +534,27 @@ function requestModel(design) {
 
 
 $('design-form').addEventListener('submit',async event=>{
-  event.preventDefault();if(busy)return;clearTimeout(previewTimer);error('');
-  result=null;refreshExportButtons();$('viewer').dataset.ready='false';
+  event.preventDefault();clearTimeout(buildTimer);
+  // A build is running: remember the request instead of dropping the click.
+  if(busy){if(pending?.revision!==revision)rebuildQueued=true;return;}
+  clearTimeout(previewTimer);error('');
+  result=null;refreshExportButtons();setBuildState('pending');
   const valid=refreshPreview(true);if(!valid)return;
-  const current=revision;
+  const current=revision;let built=false;
   if(valid.results.trial_status==='stale'){error('設計尺寸已變更，請先解鎖舊試驗結果，再建立新試片模型。');return;}
   try{
-    busy=true;$('generate').disabled=true;status('開始建立出圖模型…');
+    busy=true;setBuildState('building');status('開始建立出圖模型…');
     const model=await requestModel(valid.results.design);
-    if(current!==revision){status('參數已變更，請重新建立出圖模型');return;}
+    if(current!==revision){status('參數已變更，出圖模型將重新建立');return;}
     result={...model,layout:valid.layout};draft={results:model.results,layout:valid.layout};
     try{syncProjectMetadata();}catch(e){projectMetadataValid=false;projectMessage(e.message,true);}
     viewer.setDesign(model.results,valid.layout,model.parts);renderMetrics(model.results);
-    document.body.classList.add('ready');$('viewer').dataset.ready='true';$('preview-state').textContent='出圖模型已驗證';
-    refreshExportButtons();status('銅塊／錫片：單一實體、體積與 STEP 回讀通過');
+    built=true;refreshExportButtons();status('銅塊／錫片：單一實體、體積與 STEP 回讀通過');
   }catch(e){if(current===revision){error(e.message);status('出圖模型建立失敗；可修正參數後重建');}}
-  finally{busy=false;$('generate').disabled=false;if(rebuildQueued){rebuildQueued=false;$('design-form').requestSubmit();}}
+  finally{
+    busy=false;setBuildState(built?'ready':$('viewer').dataset.previewValid==='true'?'pending':'invalid');
+    if(rebuildQueued){rebuildQueued=false;$('design-form').requestSubmit();}
+  }
 });
 // Output names: 專案名稱_Copper_Coin_日期 / 專案名稱_Solder_Preform_日期 /
 // 專案名稱_Coin_Solder_Masker_日期 (file-names.js).
@@ -566,7 +618,8 @@ $('download-zip').addEventListener('click', () => runExport('download-zip', asyn
   if (!result) return;
   const snapshot = result;
   try {
-    const r = snapshot.results, files = {}, template = await loadDrawingTemplate(), watermark = await pdfWatermark().catch(() => null);
+    const r = snapshot.results, files = {}, template = await loadDrawingTemplate();
+    const watermark = await pdfWatermark().catch(e => { status(`浮水印無法讀取，出圖包內的 PDF 未加浮水印：${e.message}`); return null; });
     files[fileName('layout','dxf')] = strToU8(layoutDxf(r, snapshot.layout));
     for (const [name, model] of Object.entries(snapshot.parts)) {
       files[fileName(name,'dxf')] = drawingDxf(name, r, template);
@@ -589,14 +642,15 @@ function selectExportPart(value){
   part=value;$('export-part').value=value;renderPartNumber();refreshExportButtons();
 }
 function renderPartNumber(){
-  const drawn=part!=='layout',group=$('part-number-group');group.hidden=!drawn;
+  const drawn=part!=='layout',group=$('part-number-group');group.hidden=!drawn;$('layout-summary').hidden=drawn;
+  $('download-dxf').textContent=drawn?'外形 DXF':'Layout DXF';
   for(const id of ['drawing-cover','drawing-watermark'])$(id).closest('label').classList.toggle('inactive',!drawn);
   if(!drawn)return;
   const entry=partNumbers[part],input=$('part-no'),complete=entry.part_no.length===PART_NO_BASE_LENGTH;
   $('part-no-label').textContent=`${PART_LABELS[part]}料號`;
   if(input.value!==entry.part_no)input.value=entry.part_no;
   input.readOnly=entry.locked;input.setAttribute('aria-readonly',String(entry.locked));$('part-rev').value=entry.rev;$('part-rev').disabled=entry.locked;
-  $('part-lock').textContent=entry.locked?'🔒':'🔓';$('part-lock').setAttribute('aria-pressed',String(entry.locked));
+  $('part-lock').setAttribute('aria-pressed',String(entry.locked));
   $('part-lock').disabled=!entry.locked&&!complete;
   $('part-lock').title=entry.locked?'解鎖後可修改料號':complete?'鎖定料號（隨專案儲存）':'填滿前 10 碼後可鎖定';
   const full=fullPartNumber(entry),out=$('part-no-full');
@@ -664,7 +718,7 @@ $('settings-open').addEventListener('click',renderWatermark);
 
 initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');storageUI.start();
 setupFullscreen({$});
-setupVersionUI({$,hasUnsavedChanges:()=>{autoSaver.flush();return projectDirty;}});
+setupVersionUI({$,hasUnsavedChanges:()=>{autoSaver.flush();return projectDirty;},beforeReload:()=>{leaving=true;}});
 // The JavaScript preview is shown first; the OpenCascade WebAssembly engine
 // (several MB) is fetched and the export model built once the page is idle.
 const buildWhenIdle=()=>submitProjectModel();
