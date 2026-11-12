@@ -35,6 +35,25 @@ async function withDeadline(operation,ms,label){
     // UTF-8 locale: Chromium falls back to "download" for Chinese file names under the C locale.
     browser = await chromium.launch({ executablePath: executable, channel:executable?undefined:'chromium', headless: true, env:{...process.env,LANG:'C.UTF-8'}, args: ['--no-sandbox', '--disable-dev-shm-usage', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     page = await browser.newPage({ viewport: { width: 1920, height: 900 }, locale: 'zh-TW', acceptDownloads: true, reducedMotion: 'no-preference' });
+    // Full screen: the button toggles it; with auto full screen on, the first click enters it,
+    // and leaving with the button is respected. Checked on its own page; the main page turns auto off.
+    {
+      const fsPage=await browser.newPage({viewport:{width:1280,height:800}});
+      await fsPage.goto(url,{waitUntil:'domcontentloaded',timeout:120000});
+      const fs=()=>fsPage.evaluate(()=>!!document.fullscreenElement);
+      assert.equal(await fsPage.locator('#fullscreen-toggle').isVisible(),true);assert.equal(await fs(),false,'never full screen before a user action');
+      await fsPage.locator('#project-name').click();await fsPage.waitForFunction(()=>!!document.fullscreenElement);
+      await fsPage.waitForFunction(()=>document.getElementById('fullscreen-toggle').getAttribute('aria-pressed')==='true');
+      await fsPage.locator('#fullscreen-toggle').click();await fsPage.waitForFunction(()=>!document.fullscreenElement);
+      await fsPage.locator('#pa-model').click();assert.equal(await fs(),false,'auto full screen only once per visit');
+      await fsPage.locator('#fullscreen-toggle').click();await fsPage.waitForFunction(()=>!!document.fullscreenElement);
+      await fsPage.locator('#fullscreen-toggle').click();await fsPage.waitForFunction(()=>!document.fullscreenElement);
+      await fsPage.locator('#settings-open').click();await fsPage.locator('#auto-fullscreen').uncheck();await fsPage.locator('#settings-close').click();
+      await fsPage.reload({waitUntil:'domcontentloaded'});assert.equal(await fsPage.locator('#auto-fullscreen').isChecked(),false);
+      await fsPage.locator('#project-name').click();await fsPage.waitForTimeout(300);assert.equal(await fs(),false,'auto full screen turned off');
+      await fsPage.close();
+    }
+    await page.addInitScript(()=>{try{localStorage.setItem('pa-copper-cad.auto-fullscreen','off');}catch{}});
     const errors = []; page.on('pageerror', e => errors.push(e.message));
     page.on('console', m => { if (m.type() === 'error') console.error('Browser console:', m.text()); });
     await page.goto(url, { waitUntil: 'networkidle', timeout: 120000 });

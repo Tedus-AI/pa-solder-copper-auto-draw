@@ -1,6 +1,6 @@
 {
   "name": "pa-copper-cad-web",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,8 @@
     "test:browser": "node tests/browser.cjs",
     "preview": "vite preview --host 127.0.0.1",
     "lint": "eslint .",
-    "format": "prettier --write src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js src/part-numbers.js src/preform-drawing.js src/dxf-pdf.js src/file-names.js src/watermark-store.js tests/drawing-outputs.test.js tests/watermark-store.test.js src/app-version.js tests/app-version.test.js vite.config.js src/autosave.js tests/autosave.test.js",
-    "format:check": "prettier --check src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js src/part-numbers.js src/preform-drawing.js src/dxf-pdf.js src/file-names.js src/watermark-store.js tests/drawing-outputs.test.js tests/watermark-store.test.js src/app-version.js tests/app-version.test.js vite.config.js src/autosave.js tests/autosave.test.js"
+    "format": "prettier --write src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js src/part-numbers.js src/preform-drawing.js src/dxf-pdf.js src/file-names.js src/watermark-store.js tests/drawing-outputs.test.js tests/watermark-store.test.js src/app-version.js tests/app-version.test.js vite.config.js src/autosave.js tests/autosave.test.js src/fullscreen.js tests/fullscreen.test.js",
+    "format:check": "prettier --check src/design.js src/layout.js src/dxf-document.js src/project-db.js src/local-file-db.js src/sp-sync.js src/msal-auth.js src/storage-ui.js src/copper-drawing.js tests/project-db.test.js tests/sp-sync.test.js tests/local-file-db.test.js tests/fake-graph.js tests/copper-drawing.test.js eslint.config.js src/part-numbers.js src/preform-drawing.js src/dxf-pdf.js src/file-names.js src/watermark-store.js tests/drawing-outputs.test.js tests/watermark-store.test.js src/app-version.js tests/app-version.test.js vite.config.js src/autosave.js tests/autosave.test.js src/fullscreen.js tests/fullscreen.test.js"
   },
   "dependencies": {
     "fflate": "0.8.2",

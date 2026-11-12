@@ -308,3 +308,9 @@
 /* ───── Auto-save switch in the project toolbar ───── */
 .autosave-option{display:flex;align-items:center;gap:3px;font-size:10px;color:#4c6944;white-space:nowrap;cursor:pointer;padding:0 2px}
 .autosave-option input{accent-color:#55815d;width:12px;height:12px;margin:0}
+/* ───── Full screen button (header) and 設定 → 顯示 ───── */
+#fullscreen-toggle .fs-exit,#fullscreen-toggle[aria-pressed=true] .fs-enter{display:none}
+#fullscreen-toggle[aria-pressed=true] .fs-exit{display:block}
+#fullscreen-toggle svg{stroke-linecap:round}
+.settings-check{display:flex;align-items:center;gap:6px;font-size:12px;color:#2e4a36;margin:4px 0}
+.settings-check input{accent-color:#55815d;width:14px;height:14px;margin:0}
