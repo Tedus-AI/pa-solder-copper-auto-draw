@@ -20,6 +20,7 @@ import { setupStorageUI } from './storage-ui.js';
 import {chamferFor,TRIAL_DELTA,emptyTrial,trialChoices} from './preform-rules.js';
 import { createCalculationGuide } from './calculation-guide.js';
 import { setupVersionUI } from './app-version.js';
+import { setupFullscreen } from './fullscreen.js';
 import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAutosavePreference } from './autosave.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
@@ -662,6 +663,7 @@ $('settings-open').addEventListener('click',renderWatermark);
 
 
 initializeProjects();updateToleranceLock();refreshPreview();viewer.setView('iso');storageUI.start();
+setupFullscreen({$});
 setupVersionUI({$,hasUnsavedChanges:()=>{autoSaver.flush();return projectDirty;}});
 // The JavaScript preview is shown first; the OpenCascade WebAssembly engine
 // (several MB) is fetched and the export model built once the page is idle.
