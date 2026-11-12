@@ -453,10 +453,10 @@ function renderMetrics(r){
   $('alerts-count').textContent=alerts.length;$('alerts-list').replaceChildren(...alerts.map(item));
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');
   const maximum=r.pa_envelope?[r.pa_envelope.max_length,r.pa_envelope.max_width]:r.opening_chain.maximum;
-  $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append(' · ');$('package-derived').append(formatDimension(index?'Wmax':'Lmax',value));formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
+  $('package-derived').replaceChildren();maximum.forEach((value,index)=>{if(index)$('package-derived').append(' · ');$('package-derived').append(`${index?'Wmax':'Lmax'} = ${value.toFixed(3)} mm`);formulaHelp($('package-derived'),index?'pa-wmax':'pa-lmax',index?'PA 最大寬度':'PA 最大長度');});
   $('copper-derived').textContent=formatDimension('HSK 槽深',r.heatsink_depth,{tolerance:'±0.05'});formulaHelp($('copper-derived'),'hsk-depth','HSK 深度');
-  $('stack-derived').textContent=`L = C + 0.1 + 0.1 − SPH − 0.3 + K = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
-  $('boss-derived').textContent=`下段 L − K = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(` · 總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
+  $('stack-derived').textContent=`中凸台總高 L = ${r.boss_total_height.toFixed(4)} mm`;formulaHelp($('stack-derived'),'stack-total','中凸台總高');
+  $('boss-derived').textContent=`下段 = ${r.boss_lower_height.toFixed(4)} mm`;formulaHelp($('boss-derived'),'boss-lower','中凸台下段高度');$('boss-derived').append(` · 總高 L = ${r.boss_total_height.toFixed(4)} mm`);formulaHelp($('boss-derived'),'boss-upper','小凸台頂面總高');
   $('opening-chain').textContent=`${r.design.pcb.opening_mode==='auto'?'自動':'建議'} ${formatDimension('M',r.recommended_opening[0])}；${formatDimension('N',r.recommended_opening[1])}（${r.design.pcb.opening_rule==='delta'?'Delta':'Ampleon'}）`;
   const gaps=r.gap_analysis;
   if(gaps){
