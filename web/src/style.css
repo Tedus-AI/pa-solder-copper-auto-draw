@@ -1757,7 +1757,7 @@ main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 1px;
   padding: 3px 9px 4px;
   border-radius: 6px;
