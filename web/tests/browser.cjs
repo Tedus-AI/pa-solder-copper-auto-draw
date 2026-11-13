@@ -564,7 +564,7 @@ async function withDeadline(operation,ms,label){
     assert.equal(await page.locator('#error').isVisible(),false);
     await page.locator('#drawing-cover').check();
     await page.screenshot({path:path.join(output,'layout.png'),fullPage:true});
-    assert.equal(await page.locator('#metric-model').textContent(), '0.535851');
+    assert.equal(await page.locator('#metric-model').textContent(), '0.54');assert.equal(await page.locator('#metric-model-raw').textContent(), '0.535851');
     // A lock on a new project without a name is not written silently; save first.
     await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'true');assert.match(await page.locator('#project-save-status').textContent(),/尚未儲存/);
     await page.locator('#trial-lock').click();assert.equal(await page.locator('#trial-lock').getAttribute('aria-pressed'),'false');

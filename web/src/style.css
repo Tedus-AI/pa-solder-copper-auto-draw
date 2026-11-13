@@ -1823,6 +1823,15 @@ main {
   border-radius: 0;
   padding-left: 14px;
 }
+.kpi-value .kpi-round {
+  align-self: center;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  font-size: 9.5px;
+  line-height: 14px;
+  color: var(--ink-3);
+}
 #kpi-trial-state[data-status='locked'] {
   color: var(--ok);
   font-weight: 600;
