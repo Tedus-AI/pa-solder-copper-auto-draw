@@ -442,7 +442,7 @@ $('trial-lock').addEventListener('click',()=>{
 });
 function renderMetrics(r){
   renderTrial(r);
-  for(const[id,v,digits]of [['metric-l',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
+  for(const[id,v,digits]of [['metric-l',r.boss_total_height,4],['metric-z',r.calculated_thickness,6],['metric-model',r.model_thickness,2],['metric-model-raw',r.model_thickness,6],['metric-volume',r.solder_volume,3],['v-cavity',r.cavity_volume,3],['v-boss',r.boss_volume,3],['v-area',r.preform_area,3]])$(id).textContent=v.toFixed(digits);
   $('trials').textContent=r.trial_thicknesses.map(v=>v.toFixed(4)).join(' / ');
   $('kpi-boss-lower').textContent=r.boss_lower_height.toFixed(4);
   const item=message=>{const li=document.createElement('li');li.textContent=message;return li;};
