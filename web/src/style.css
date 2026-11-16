@@ -1110,6 +1110,61 @@ main {
   font-size: 13.5px;
   font-weight: 700;
 }
+/* 鎖定設計: deep indigo, a colour used nowhere else in the tool, so it stands out. */
+.design-lock {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px 0 10px;
+  border: 1px solid #312e81;
+  border-radius: 7px;
+  background: linear-gradient(#5b54e8, #3f37c9);
+  box-shadow:
+    0 2px 0 #2a2580,
+    0 3px 6px #3f37c940;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  transform: translateY(-1px);
+}
+.design-lock:hover {
+  background: linear-gradient(#6a63f0, #4840d6);
+}
+.design-lock svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.design-lock circle {
+  fill: currentColor;
+  stroke: none;
+}
+.design-lock[aria-pressed='true'] {
+  transform: translateY(1px);
+  border-color: #1e1b4b;
+  background: linear-gradient(#2e2a7a, #1e1b4b);
+  box-shadow:
+    0 1px 0 #13112f,
+    inset 0 1px 3px #0006;
+  color: #fde68a;
+}
+.design-lock[aria-pressed='true'] .shackle {
+  d: path('M8 10.5V7a4 4 0 0 1 8 0v3.5');
+}
+/* Locked: entered values are read only, shown with a light indigo tint. */
+.design-locked .nominal-input,
+.design-locked .tolerance-input,
+.design-locked .pa-card.active input,
+body.design-locked .pa-card.active input {
+  background: #eef0fb;
+  color: var(--ink);
+}
 .control-heading small {
   margin-left: 4px;
   font-size: 11px;

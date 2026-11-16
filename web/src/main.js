@@ -27,7 +27,7 @@ import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAut
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer, buildTimer;
-let leadCount=6;
+let leadCount=6,designLock={locked:false,at:null};
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial(),partNumbers=emptyPartNumbers();
 const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 // Export buttons follow one state: the verified CAD model (STEP, outline DXF, bundle),
@@ -236,7 +236,7 @@ function renderPaCards(rebuild=false){
     const i=Number(card.dataset.pa),specs=specsFor(i),button=card.querySelector('.spec-btn'),tag=card.querySelector('.pa-tag');
     card.classList.toggle('active',separatePas()&&i===activePa);card.classList.toggle('solo',!multiPa());
     tag.disabled=!separatePas();tag.title=separatePas()?(i===activePa?`目前編輯 ${paLabel(i)} 的設計尺寸`:`切換到 ${paLabel(i)} 的設計尺寸`):paLabel(i);
-    for(const field of ['brand','model']){const input=paInput(i,field);if(input&&document.activeElement!==input&&input.value!==paItems[i][field])input.value=paItems[i][field];}
+    for(const field of ['brand','model']){const input=paInput(i,field);if(!input)continue;if(document.activeElement!==input&&input.value!==paItems[i][field])input.value=paItems[i][field];input.readOnly=i===activePa?designLock.locked:!!paItems[i].design?.design_lock?.locked;}
     button.disabled=!specs.length;button.querySelector('.n').textContent=specs.length>1?` ${specs.length} 份`:'';
     button.title=specs.length?`開啟 AI-Thermal 已上傳的規格書（SharePoint）：\n${specs.map(spec=>spec.name).join('\n')}`:aiProject()?`AI-Thermal 的 ${paItems[i].ai_component||paLabel(i)} 尚未上傳規格書`:'從 AI-Thermal 專案清單選擇專案後，可開啟該 PA 的規格書';
   }
@@ -248,7 +248,7 @@ function renderPaUi(rebuild=false){
   else if(ai.band==='FR2'){$('duplex-value').textContent='不適用';chip.dataset.state='na';chip.title=`AI-Thermal「${ai.name}」是 FR2 專案，不填 Duplex Mode（唯讀）`;}
   else{$('duplex-value').textContent=ai.duplex;chip.dataset.state='ok';chip.title=ai.duplexDefault?`AI-Thermal「${ai.name}」尚未設定 Duplex Mode，顯示其預設值 ${ai.duplex}（唯讀）`:`讀自 AI-Thermal「${ai.name}」（唯讀）`;}
   document.querySelector('.topbar').dataset.pas=String(paItems.length);document.querySelector('.topbar').classList.toggle('same-part',samePart&&multiPa());
-  const same=$('same-part');same.hidden=!multiPa();same.setAttribute('aria-pressed',String(samePart));
+  const same=$('same-part');same.hidden=!multiPa();same.disabled=designLock.locked;same.setAttribute('aria-pressed',String(samePart));
   $('same-part-text').textContent=samePart?'同料 · 共用尺寸':'PA1、PA2 同料';
   same.title=samePart?'PA1、PA2 同料：共用 PA1 的設計尺寸，只出一套圖。再按一下改回各自設計（PA2 原本的尺寸會恢復）':'兩個頻段用同一顆料時按下：PA1、PA2 共用 PA1 的設計尺寸，只出一套圖（PA2 原本的尺寸保留）';
   const sw=$('pa-switch');sw.hidden=!multiPa();
@@ -314,7 +314,7 @@ function formValues(){
       d.tolerances[path][sign]=raw===''?0:Number(raw);
     }
   }
-  d.package.lead_count=leadCount;
+  d.package.lead_count=leadCount;d.design_lock=structuredClone(designLock);
   d.trial_result=structuredClone(trialRecord);d.part_numbers=structuredClone(partNumbers);
   d.copper.hole_corners=[...document.querySelectorAll('[data-hole-corner]:checked')].map(e=>e.dataset.holeCorner);
   d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
@@ -338,6 +338,7 @@ function fillDesign(d){
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
   $('boss-size-auto').checked=d.boss.size_mode==='auto';
   tolerancesUnlocked=false;updateToleranceLock();syncLinkedFields(d);
+  designLock=structuredClone(d.design_lock??{locked:false,at:null});applyDesignLock();syncLinkedFields(d);// derived fields of the loaded design
 }
 function derivedValue(path,value,readonly,title){const input=inputFor(path);if(!input)return;input.readOnly=readonly;input.setAttribute('aria-readonly',String(readonly));input.title=title||'';if(readonly){input.value=Number(value.toFixed(6));const[group,key]=path.split('.');return[key,value,group];}}
 function syncLinkedFields(d){
@@ -358,6 +359,7 @@ function syncLinkedFields(d){
   inputFor('preform.chamfer').value=d.preform.chamfer.toFixed(2);
   derivedValue('preform.trial_delta',TRIAL_DELTA,true,'三款試片固定採計算厚度 ±0.15 mm。');
   inputFor('preform.thickness_override').readOnly=true;inputFor('preform.thickness_override').setAttribute('aria-readonly','true');
+  if(designLock.locked)for(const input of document.querySelectorAll('#design-form .nominal-input'))input.readOnly=true;
   return d;
 }
 function status(text){$('status').textContent=text;$('status').title=text;}
@@ -552,7 +554,34 @@ $('pcb-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshP
 $('pcb-rule').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('boss-size-auto').addEventListener('change',()=>{clearTimeout(previewTimer);refreshPreview(true);});
 $('boss-center').addEventListener('click',()=>{inputFor('boss.center_from_left').value=Number(inputFor('copper.base_length').value)/2;inputFor('boss.center_from_bottom').value=Number(inputFor('copper.base_width').value)/2;invalidate();refreshPreview(true);markDirty();});
-$('tolerance-unlock').addEventListener('click',()=>{tolerancesUnlocked=!tolerancesUnlocked;updateToleranceLock();});
+$('tolerance-unlock').addEventListener('click',()=>{if(designLock.locked)return;tolerancesUnlocked=!tolerancesUnlocked;updateToleranceLock();});
+// ───── 鎖定設計: every value the designer enters becomes read only ─────
+// Dimension fields stay focusable (read only), so they still locate the dimension in 3D.
+const DESIGN_LOCK_CONTROLS='#pcb-auto,#pcb-rule,#boss-size-auto,#boss-center,#trial-lock,#trial-choice,#pa-leads,#same-part,#tolerance-unlock,[data-hole-corner]';
+function applyDesignLock(){
+  const locked=designLock.locked,form=$('design-form');
+  form.classList.toggle('design-locked',locked);document.body.classList.toggle('design-locked',locked);
+  if(locked){tolerancesUnlocked=false;updateToleranceLock();}
+  for(const input of form.querySelectorAll('.nominal-input'))input.readOnly=locked;// unlocking: syncLinkedFields below restores the derived fields
+  for(const control of document.querySelectorAll(DESIGN_LOCK_CONTROLS))control.disabled=locked;
+  for(const input of [paInput(activePa,'brand'),paInput(activePa,'model')])if(input)input.readOnly=locked;
+  // Unlocking: the caller restores the derived (read-only) fields with syncLinkedFields —
+  // not from formValues() here, which during a load would read the previous project's PA cards.
+  if(!locked){guardHoleCorners();$('trial-choice').disabled=trialRecord.locked;}
+  const button=$('design-lock');button.setAttribute('aria-pressed',String(locked));
+  $('design-lock-text').textContent=locked?'設計已鎖定':'鎖定設計';
+  button.title=locked?`設計已鎖定${designLock.at?`（${new Date(designLock.at).toLocaleString('zh-TW',{hour12:false})}）`:''}：所有設計值唯讀，注意事項不再顯示。按下解鎖後可修改`:'設計確認無誤時按下：鎖定所有設計值（尺寸、公差、選項），注意事項不再顯示';
+}
+$('design-lock').addEventListener('click',()=>{
+  if(!designLock.locked){
+    clearTimeout(previewTimer);
+    if(!refreshPreview(true)){error('設計尺寸有誤，修正後才能鎖定設計。');return;}
+    designLock={locked:true,at:new Date().toISOString()};
+  }else designLock={locked:false,at:null};
+  applyDesignLock();clearTimeout(previewTimer);refreshPreview();
+  for(const value of [result,draft])if(value?.results?.design)value.results.design.design_lock=structuredClone(designLock);
+  markDirty(designLock.locked?`${multiPa()?paLabel(activePa)+' ':''}設計已鎖定；${saveHint()}`:`設計已解鎖，可修改；${saveHint()}`);
+});
 $('design-form').addEventListener('focusin',event=>{
   if(event.target.type==='number'){
     clearTimeout(previewTimer);refreshPreview();if(event.target.classList.contains('tolerance-input'))viewer.selectTolerance(event.target.dataset.fieldKey);else viewer.selectDimension(event.target.name);
@@ -582,7 +611,7 @@ $('help-close').addEventListener('click',()=>$('help-dialog').close());
 $('help-dialog').addEventListener('click',e=>{if(e.target===$('help-dialog'))$('help-dialog').close();});
 function renderTrial(r){
   const labels=['下','中','上'];$('trial-candidates').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('span');el.textContent=`${labels[i]} ${v.toFixed(2)}`;el.classList.toggle('selected',trialChoices[i]===trialRecord.choice);return el;}));
-  $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(2)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked;
+  $('trial-choice').replaceChildren(...r.trial_thicknesses.map((v,i)=>{const el=document.createElement('option');el.value=trialChoices[i];el.textContent=`${labels[i]}：${v.toFixed(2)} mm`;return el;}));$('trial-choice').value=trialRecord.choice;$('trial-choice').disabled=trialRecord.locked||designLock.locked;
   $('trial-lock').setAttribute('aria-pressed',String(trialRecord.locked));$('trial-lock').title=trialRecord.locked?'解鎖後重新選定試片':'鎖定並儲存此案的驗證結果';
   $('trial-result-status').textContent=r.trial_status==='stale'?`尺寸已變更；原記錄 ${trialRecord.value.toFixed(2)} mm，請解鎖重新驗證。`:r.trial_status==='locked'?`已鎖定 ${trialRecord.value.toFixed(2)} mm`:'未鎖定 · 選定並驗證後按鎖頭';$('trial-result-status').dataset.status=r.trial_status;
   document.querySelector('.trial-selection').dataset.status=r.trial_status;
@@ -615,7 +644,8 @@ function renderMetrics(r){
   const item=message=>{const li=document.createElement('li');li.textContent=message;return li;};
   $('warnings').replaceChildren(...r.warnings.map(item));
   // Standing notes stay in the help dialog; what this design triggers is raised next to the build status.
-  const alerts=r.warnings.filter(message=>!STANDING_NOTES.includes(message));
+  // A locked design is reviewed: its notes are acknowledged and no longer shown.
+  const alerts=designLock.locked?[]:r.warnings.filter(message=>!STANDING_NOTES.includes(message));
   $('alerts').hidden=!alerts.length;if(!alerts.length)$('alerts').open=false;
   $('alerts-count').textContent=alerts.length;$('alerts-list').replaceChildren(...alerts.map(item));
   $('layout-summary').textContent=[['R',r.design.layout.border_width],['S',r.design.layout.epad_size],['T',r.design.layout.web_width],['V',r.design.layout.hole_clearance]].map(([name,value])=>formatDimension(name,value,{prefix:name==='V'?'⌀':''})).join(' / ');

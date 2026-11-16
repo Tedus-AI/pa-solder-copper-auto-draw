@@ -40,6 +40,8 @@ export const defaults = {
   layout: { border_width: 1, epad_size: 1.5, web_width: 0.3, hole_clearance: 4 },
   tolerances: defaultTolerances(),
   trial_result: emptyTrial(),
+  // 鎖定設計: the PA's design is fixed and reviewed (its notes acknowledged). at = ISO time.
+  design_lock: { locked: false, at: null },
   // 12-character part numbers (10-character base + 2-digit REV) of the drawn parts.
   part_numbers: emptyPartNumbers(),
   // Several Final PAs in one project (normalizePaSet). null = one PA, the original shape.
@@ -321,6 +323,19 @@ export function normalize(input) {
   } catch (error) {
     check(false, error.message);
   }
+  const lock = input.design_lock ?? { locked: false, at: null };
+  check(
+    lock &&
+      typeof lock === 'object' &&
+      !Array.isArray(lock) &&
+      Object.keys(lock).every(k => ['locked', 'at'].includes(k)) &&
+      typeof (lock.locked ?? false) === 'boolean' &&
+      (lock.at === null ||
+        lock.at === undefined ||
+        (typeof lock.at === 'string' && ISO_TIMESTAMP.test(lock.at) && !Number.isNaN(Date.parse(lock.at)))),
+    '設計鎖定記錄格式無效。',
+  );
+  d.design_lock = lock.locked === true ? { locked: true, at: lock.at ?? null } : { locked: false, at: null };
   const record = input.trial_result ?? emptyTrial();
   check(
     record &&
