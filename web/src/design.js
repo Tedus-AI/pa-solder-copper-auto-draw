@@ -7,7 +7,7 @@ import { emptyPartNumbers, normalizePartNumbers } from './part-numbers.js';
 export const defaults = {
   name: 'pa_780_m1p',
   project: { name: '未命名專案', project_id: '', pa_brand: '', pa_model: 'H-37248KC-6/2' },
-  package: { length: 20.57, width: 9.78, max_tolerance: 0.127, support_height: 1.57 },
+  package: { length: 20.57, width: 9.78, max_tolerance: 0.127, support_height: 1.57, lead_count: 6 },
   pcb: {
     opening_length: 20.9,
     opening_width: 10.1,
@@ -42,6 +42,8 @@ export const defaults = {
   trial_result: emptyTrial(),
   // 12-character part numbers (10-character base + 2-digit REV) of the drawn parts.
   part_numbers: emptyPartNumbers(),
+  // Several Final PAs in one project (normalizePaSet). null = one PA, the original shape.
+  pa_set: null,
 };
 export const fields = {
   package: ['PA 封裝', { length: 'PA 長度', width: 'PA 寬度', support_height: '支撐高度 SPH' }],
@@ -120,6 +122,19 @@ export const STANDING_NOTES = Object.freeze([
   '試片增減量固定 ±0.15 mm；錫片製造公差 ±0.02 mm 另行設定。',
   '錫厚仍為設計尺寸（Typ.）體積估算，未含全公差錫量堆疊、損耗與空洞率。',
 ]);
+// Process-fixed design values (like A/B/D): locked in the editor and applied on every
+// load. Older records with other values are brought to these values, not rejected.
+export const FIXED_VALUES = Object.freeze({
+  'pcb.relief_diameter': 2,
+  'copper.pad_size': 1.5,
+  'stack.pad_height': 0.15,
+  'layout.border_width': 1,
+  'layout.epad_size': 1.5,
+  'layout.web_width': 0.3,
+});
+// Locating-hole clearance V follows the hanging-hole diameter D.
+export const HOLE_CLEARANCE_MARGIN = 1;
+export const holeClearanceFor = holeDiameter => holeDiameter + HOLE_CLEARANCE_MARGIN;
 export const ceilTenth = v => Math.ceil(v * 10 - Number.EPSILON * Math.abs(v) * 10) / 10;
 // Fixed process capability from PPT p8. It is not a user-entered dimensional tolerance.
 export const PLACEMENT_ALLOWANCE = 0.066;
@@ -174,6 +189,77 @@ export function normalizeProject(project) {
   }
   return result;
 }
+// ───── Several Final PAs in one project ─────
+// The record's top-level design is always the ACTIVE PA's complete design, so every
+// calculation and export works on it unchanged. pa_set keeps, per PA, its brand, model,
+// the AI-Thermal component it came from and — for the PAs not shown — their complete
+// design (the active one's is the top level, stored as null). same_part: both PAs are
+// the same part, so PA1's dimensions serve both (one drawing set); PA2's own
+// dimensions are kept for when they are separated again.
+export const MAX_PAS = 2;
+const PA_ITEM_KEYS = ['brand', 'model', 'ai_component', 'design'];
+const singleLine = (value, label, max = 100) => {
+  check(
+    // eslint-disable-next-line no-control-regex -- single printable line
+    typeof value === 'string' && !/[\u0000-\u001f\u007f]/.test(value) && value.trim().length <= max,
+    `${label}須為${max}字以內的單行文字。`,
+  );
+  return value.trim();
+};
+/** A PA's own design: everything except the project metadata and the PA set. */
+export function paDesign(design) {
+  const own = structuredClone(design);
+  delete own.project;
+  delete own.pa_set;
+  return own;
+}
+function normalizePaSet(value, d) {
+  if (value === null || value === undefined) return null;
+  check(value && typeof value === 'object' && !Array.isArray(value), 'PA 設定須為物件。');
+  for (const key of Object.keys(value))
+    check(['active', 'same_part', 'ai_project_id', 'items'].includes(key), `未知 PA 設定欄位：${key}`);
+  check(
+    Array.isArray(value.items) && value.items.length >= 1 && value.items.length <= MAX_PAS,
+    `PA 數量須為 1 至 ${MAX_PAS}。`,
+  );
+  const active = value.active ?? 0;
+  check(Number.isInteger(active) && active >= 0 && active < value.items.length, '目前 PA 編號無效。');
+  check(typeof (value.same_part ?? false) === 'boolean', 'PA 同料設定須為是或否。');
+  const same = value.items.length > 1 && value.same_part === true;
+  check(!same || active === 0, 'PA 同料時使用 PA1 的尺寸。');
+  const items = value.items.map((item, index) => {
+    check(item && typeof item === 'object' && !Array.isArray(item), `PA${index + 1} 設定須為物件。`);
+    for (const key of Object.keys(item)) check(PA_ITEM_KEYS.includes(key), `未知 PA${index + 1} 欄位：${key}`);
+    const result = {
+      brand: singleLine(item.brand ?? '', `PA${index + 1} 品牌`),
+      model: singleLine(item.model ?? '', `PA${index + 1} 型號`),
+      ai_component: singleLine(item.ai_component ?? '', `PA${index + 1} AI-Thermal 元件`, 200),
+      design: null,
+    };
+    if (index === active) {
+      // The top level is this PA; its brand and model are the project's PA fields.
+      result.brand = d.project.pa_brand;
+      result.model = d.project.pa_model;
+    } else {
+      check(
+        item.design && typeof item.design === 'object' && !Array.isArray(item.design),
+        `PA${index + 1} 缺少設計尺寸。`,
+      );
+      try {
+        result.design = paDesign(normalize(paDesign(item.design)));
+      } catch (error) {
+        check(false, `PA${index + 1}：${error.message}`);
+      }
+    }
+    return result;
+  });
+  return {
+    active,
+    same_part: same,
+    ai_project_id: singleLine(value.ai_project_id ?? '', 'AI-Thermal 專案 ID', 200),
+    items,
+  };
+}
 export function normalize(input) {
   check(input && typeof input === 'object' && !Array.isArray(input), '請輸入有效的設計參數。');
   for (const key of Object.keys(input)) check(Object.hasOwn(defaults, key), `未知欄位：${key}`);
@@ -184,6 +270,7 @@ export function normalize(input) {
     'CAD 檔名代碼須以英文字母開頭，使用英數字、_ 或 -，最多40字。',
   );
   d.project = normalizeProject(Object.hasOwn(input, 'project') ? input.project : {});
+  d.pa_set = normalizePaSet(input.pa_set, d);
   for (const group of Object.keys(fields)) {
     const values = input[group] ?? {};
     check(values && typeof values === 'object' && !Array.isArray(values), `${group} 須為設定物件。`);
@@ -211,6 +298,11 @@ export function normalize(input) {
       )
         continue;
       if (key === 'thickness_override' && value === null) continue;
+      if (group === 'package' && key === 'lead_count') {
+        // Display only: 6 leads (with the two narrow top corner leads) or 4.
+        check(value === 4 || value === 6, 'PA 腳數須為 4 或 6。');
+        continue;
+      }
       check(
         typeof value === 'number' &&
           Number.isFinite(value) &&
@@ -297,6 +389,11 @@ export function normalize(input) {
     d.stack.lead_solder === 0.1 && d.stack.board_solder === 0.1 && d.stack.flange_gap === 0.3,
     'PPT 第六頁的 A、B、D 採固定建議值 0.1／0.1／0.3 mm；調整 PCB 厚度與小凸台 K。',
   );
+  for (const [path, value] of Object.entries(FIXED_VALUES)) {
+    const [group, key] = path.split('.');
+    d[group][key] = value;
+  }
+  d.layout.hole_clearance = holeClearanceFor(d.copper.hole_diameter);
   if (!input.boss || !Object.hasOwn(input.boss, 'center_from_left')) d.boss.center_from_left = d.copper.base_length / 2;
   if (!input.boss || !Object.hasOwn(input.boss, 'center_from_bottom'))
     d.boss.center_from_bottom = d.copper.base_width / 2;
@@ -398,7 +495,6 @@ export function calculate(input) {
   if (footprint.breakouts) warnings.push('吊掛孔已穿破圓角／外緣；預覽與出圖保留實際缺口。');
   if (footprint.outside_holes) warnings.push('有吊掛孔刀具圓未切到圓角基座，實際模型不會出現該孔。');
   if (footprint.tangent_holes) warnings.push('孔與基座外形恰好相接；顯示實際輪廓，出圖仍會驗證單一實體。');
-  if (d.layout.hole_clearance < c.hole_diameter) warnings.push('定位孔避讓 V 小於實際孔徑 D；Layout 仍扣除實際孔。');
   if (analysis.overlap) warnings.push('PA／PCB 單邊最小間隙為負值，公差極限下可能干涉。');
   if (
     I + getTolerance(d, 'boss.length').plus > b.opening_length - getTolerance(d, 'pcb.opening_length').minus ||

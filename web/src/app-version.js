@@ -29,6 +29,13 @@ export function buildLabel(info = APP_INFO) {
   return `${date} ${p(time.getHours())}:${p(time.getMinutes())} · ${info.commit}`;
 }
 
+/** Date of the build in local time, e.g. "更新 2026/11/16" (shown next to the version). */
+export function buildDateLabel(info = APP_INFO) {
+  const time = new Date(info.built);
+  if (Number.isNaN(time.getTime())) return '';
+  return `更新 ${time.getFullYear()}/${time.getMonth() + 1}/${time.getDate()}`;
+}
+
 /** A well-formed version.json object, or null. */
 export function parseVersionInfo(value) {
   if (!value || typeof value !== 'object') return null;
@@ -80,6 +87,11 @@ export function setupVersionUI({
     build = buildLabel();
   $('app-version').textContent = label;
   $('app-version').title = `PA Copper CAD ${label}\n建置 ${build}`;
+  const dateLabel = $('app-build-date');
+  if (dateLabel) {
+    dateLabel.textContent = buildDateLabel();
+    dateLabel.title = `建置 ${build}`;
+  }
   $('settings-version').textContent = label;
   $('settings-build').textContent = build;
   const deployed = $('settings-deployed'),

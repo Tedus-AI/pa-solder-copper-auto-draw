@@ -1,7 +1,7 @@
 import './style.css';
 import './guide.css';
 import { zipSync, strToU8 } from 'fflate';
-import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject, STANDING_NOTES } from './design.js';
+import { defaults, fields, calculate, nativeJob, openingRecommendation, ceilTenth, normalizeProject, STANDING_NOTES, FIXED_VALUES, holeClearanceFor, paDesign, MAX_PAS } from './design.js';
 import { toleranceDefaults, getTolerance, toleranceText, toleranceSource, toleranceSuffix } from './tolerances.js';
 import { faceViews } from './camera-views.js';
 import { formatDimension, dimensionSpecs } from './dimension-format.js';
@@ -26,6 +26,7 @@ import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAut
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
 let worker, pending, counter=0, revision=0, result=null, draft=null, part='copper', busy=false, previewTimer, buildTimer;
+let leadCount=6;
 let layoutKey='', cachedLayout=null, tolerancesUnlocked=false,trialRecord=emptyTrial(),partNumbers=emptyPartNumbers();
 const projectStore=new ProjectDatabase(),localFile=new LocalFileDb(),spSync=new SharePointSync({db:projectStore,auth:new MsalAuth()});let activeProjectId=null,activeRecordStamp=null,rebuildQueued=false,projectMetadataValid=true,projectDirty=false;
 // Export buttons follow one state: the verified CAD model (STEP, outline DXF, bundle),
@@ -135,7 +136,7 @@ for(const group of uiGroups){
     const caption=document.createElement('label');caption.htmlFor=path.replace('.','-');caption.title=title;const[captionName,symbol]=captionParts(path,title);const captionText=document.createElement('span');captionText.className='dimension-caption';captionText.textContent=captionName;caption.append(captionText);
     if(symbol){const chip=document.createElement('span');chip.className='dimension-symbol';chip.textContent=symbol;caption.append(chip);}
     const source=document.createElement('span');source.className='tolerance-source'+(unknownTolerance(path)?' unspecified':'');source.textContent=unknownTolerance(path)?'*':'·';source.title=unknownTolerance(path)?'資料未指定公差；分析暫按 0，解鎖後可手動輸入。':sourceFor(path);caption.append(source);row.append(caption);
-    if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom','preform.chamfer','preform.trial_delta'].includes(path))formulaHelp(caption,path,title);
+    if(['pcb.opening_length','pcb.opening_width','boss.length','boss.width','boss.total_height','preform.length','preform.width','boss.center_from_left','boss.center_from_bottom','preform.chamfer','preform.trial_delta','layout.hole_clearance'].includes(path))formulaHelp(caption,path,title);
     const input=document.createElement('input');input.type='number';input.className='nominal-input';input.name=path;input.id=path.replace('.','-');
     input.step='any';input.min='0';input.max='10000';input.inputMode='decimal';input.required=key!=='thickness_override';input.value=defaults[g][key]??'';
     input.setAttribute('aria-label',`${title} mm`);if(key==='thickness_override')input.placeholder='自動';row.append(input);
@@ -190,8 +191,130 @@ function updateToleranceLock(){
   $('tolerance-status').textContent=tolerancesUnlocked?'可修改上下公差':'公差已鎖定';
   $('design-form').classList.toggle('tolerances-unlocked',tolerancesUnlocked);
 }
+// ───── Final PAs (design.pa_set) ─────
+// One complete design per PA. The form always edits the active PA; the others are kept
+// in paItems[i].design. PA1/PA2 buttons switch the form, 3D, results and exports.
+// 同料 (same part): PA1's dimensions serve both PAs and one drawing set is exported;
+// PA2's own dimensions stay in paItems[1].design for when they are separated again.
+let paItems=[{brand:'',model:'',ai_component:'',design:null}],activePa=0,samePart=false,aiProjectId='';
+let aiList=spSync.cachedAiThermal()?.projects??[];
+const LINK_ICON='<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6.5 9.5l3-3M7 4.5l1.2-1.2a2.6 2.6 0 0 1 3.7 3.7L10.7 8.2M9 11.5l-1.2 1.2a2.6 2.6 0 0 1-3.7-3.7L5.3 7.8"/></svg>';
+const paLabel=i=>`PA${i+1}`;
+const multiPa=()=>paItems.length>1;
+const separatePas=()=>multiPa()&&!samePart;
+const paInput=(i,field)=>$(i?`pa-${field}-${i+1}`:`pa-${field}`);
+function readPaCards(){paItems.forEach((item,i)=>{for(const field of ['brand','model']){const input=paInput(i,field);if(input)item[field]=input.value.trim();}});}
+function paSetValue(){
+  if(!multiPa()&&!aiProjectId)return null;
+  return{active:activePa,same_part:samePart&&multiPa(),ai_project_id:aiProjectId,items:paItems.map((item,i)=>({brand:item.brand,model:item.model,ai_component:item.ai_component,design:i===activePa?null:structuredClone(item.design)}))};
+}
+function loadPaState(d){
+  const set=d.pa_set;
+  if(set){paItems=set.items.map(item=>({brand:item.brand,model:item.model,ai_component:item.ai_component,design:item.design?structuredClone(item.design):null}));activePa=set.active;samePart=set.same_part;aiProjectId=set.ai_project_id;}
+  else{paItems=[{brand:d.project?.pa_brand??'',model:d.project?.pa_model??defaults.project.pa_model,ai_component:'',design:null}];activePa=0;samePart=false;aiProjectId='';}
+}
+/** The AI-Thermal project this design is linked to (by id; by name for older records). */
+function aiProject(){return aiList.find(p=>p.id===aiProjectId)||(!aiProjectId&&aiList.find(p=>p.name===$('project-name').value.trim()))||null;}
+function specsFor(i){
+  const ai=aiProject();if(!ai)return[];
+  const item=paItems[i],match=ai.finalPas.find(pa=>pa.component===item.ai_component)??(item.ai_component?null:ai.finalPas[i]);
+  return match?.specs??[];
+}
+function renderPaCards(rebuild=false){
+  const box=$('pa-cards');
+  if(rebuild||box.children.length!==paItems.length){
+    box.replaceChildren(...paItems.map((item,i)=>{
+      const card=document.createElement('div');card.className='pa-card';card.dataset.pa=i;
+      const brandId=i?`pa-brand-${i+1}`:'pa-brand',modelId=i?`pa-model-${i+1}`:'pa-model';
+      card.innerHTML=`<button type="button" class="pa-tag" data-pa-select="${i}">${paLabel(i)}</button><label for="${brandId}" class="bar-field brand-f" title="${paLabel(i)} 品牌"><span>品牌</span><input form="design-form" id="${brandId}" data-pa="${i}" maxlength="100" placeholder="例：NXP" autocomplete="off"></label><label for="${modelId}" class="bar-field model-f" title="${paLabel(i)} 型號"><span>型號</span><input form="design-form" id="${modelId}" data-pa="${i}" maxlength="100" placeholder="輸入 PA 型號" autocomplete="off"></label><button type="button" class="spec-btn" data-pa-spec="${i}">📄<span class="t"> 規格書</span><span class="n"></span></button>`;
+      card.querySelector(`#${brandId}`).value=item.brand;card.querySelector(`#${modelId}`).value=item.model;
+      return card;
+    }));
+  }
+  for(const card of box.children){
+    const i=Number(card.dataset.pa),specs=specsFor(i),button=card.querySelector('.spec-btn'),tag=card.querySelector('.pa-tag');
+    card.classList.toggle('active',separatePas()&&i===activePa);card.classList.toggle('solo',!multiPa());
+    tag.disabled=!separatePas();tag.title=separatePas()?(i===activePa?`目前編輯 ${paLabel(i)} 的設計尺寸`:`切換到 ${paLabel(i)} 的設計尺寸`):paLabel(i);
+    for(const field of ['brand','model']){const input=paInput(i,field);if(input&&document.activeElement!==input&&input.value!==paItems[i][field])input.value=paItems[i][field];}
+    button.disabled=!specs.length;button.querySelector('.n').textContent=specs.length>1?` ${specs.length} 份`:'';
+    button.title=specs.length?`開啟 AI-Thermal 已上傳的規格書（SharePoint）：\n${specs.map(spec=>spec.name).join('\n')}`:aiProject()?`AI-Thermal 的 ${paItems[i].ai_component||paLabel(i)} 尚未上傳規格書`:'從 AI-Thermal 專案清單選擇專案後，可開啟該 PA 的規格書';
+  }
+}
+function renderPaUi(rebuild=false){
+  renderPaCards(rebuild);
+  const ai=aiProject(),chip=$('duplex-chip');
+  if(!ai){$('duplex-value').textContent='—';chip.dataset.state='none';chip.title='Duplex Mode：從 AI-Thermal 專案清單選擇專案後顯示（唯讀）';}
+  else if(ai.band==='FR2'){$('duplex-value').textContent='不適用';chip.dataset.state='na';chip.title=`AI-Thermal「${ai.name}」是 FR2 專案，不填 Duplex Mode（唯讀）`;}
+  else{$('duplex-value').textContent=ai.duplex;chip.dataset.state='ok';chip.title=ai.duplexDefault?`AI-Thermal「${ai.name}」尚未設定 Duplex Mode，顯示其預設值 ${ai.duplex}（唯讀）`:`讀自 AI-Thermal「${ai.name}」（唯讀）`;}
+  document.querySelector('.topbar').dataset.pas=String(paItems.length);document.querySelector('.topbar').classList.toggle('same-part',samePart&&multiPa());
+  const same=$('same-part');same.hidden=!multiPa();same.setAttribute('aria-pressed',String(samePart));
+  $('same-part-text').textContent=samePart?'同料 · 共用尺寸':'PA1、PA2 同料';
+  same.title=samePart?'PA1、PA2 同料：共用 PA1 的設計尺寸，只出一套圖。再按一下改回各自設計（PA2 原本的尺寸會恢復）':'兩個頻段用同一顆料時按下：PA1、PA2 共用 PA1 的設計尺寸，只出一套圖（PA2 原本的尺寸保留）';
+  const sw=$('pa-switch');sw.hidden=!multiPa();
+  if(samePart)sw.innerHTML=`<span class="pa-btn active" title="PA1、PA2 同料，共用這組設計尺寸">PA1 ${LINK_ICON} PA2</span>`;
+  else sw.innerHTML=paItems.map((_,i)=>`<button type="button" class="pa-btn${i===activePa?' active':''}" data-pa-select="${i}" aria-pressed="${i===activePa}" title="${i===activePa?`目前編輯 ${paLabel(i)}`:`切換到 ${paLabel(i)} 的設計尺寸`}">${paLabel(i)}</button>`).join('');
+  const label=$('viewer-pa');label.hidden=!multiPa();label.innerHTML=samePart?`PA1 ${LINK_ICON} PA2`:paLabel(activePa);label.title=samePart?'PA1、PA2 同料':`目前顯示 ${paLabel(activePa)}`;
+}
+/** Shows PA k: the edited PA's current design is kept, PA k's design fills the form. */
+function switchPa(k){
+  if(k===activePa||samePart||!paItems[k])return true;
+  let current;
+  try{current=calculate(syncLinkedFields(formValues())).design;}
+  catch(e){error(`${paLabel(activePa)} 的尺寸未完成，請先修正再切換：${e.message}`);return false;}
+  paItems[activePa].design=paDesign(current);
+  const next=structuredClone(paItems[k].design);paItems[k].design=null;activePa=k;
+  next.project={...current.project,pa_brand:paItems[k].brand,pa_model:paItems[k].model};
+  fillDesign(next);renderPaUi();invalidate();submitProjectModel();
+  status(`已切換到 ${paLabel(k)}`);return true;
+}
+/** Links the project to an AI-Thermal project: Final PA count and models (never removes a PA). */
+function applyAiProject(project){
+  let changed=aiProjectId!==project.id;aiProjectId=project.id;readPaCards();
+  const count=Math.min(MAX_PAS,Math.max(1,project.finalPas.length));
+  if(paItems.length<count){
+    let base;
+    try{base=activePa===0?paDesign(calculate(syncLinkedFields(formValues())).design):structuredClone(paItems[0].design);}
+    catch(e){error(`AI-Thermal 有 ${count} 顆 Final PA，但 PA1 的尺寸未完成，暫未加入：${e.message}`);base=null;}
+    // A new PA starts from PA1's dimensions, with its own trial record and part numbers.
+    while(base&&paItems.length<count){const copy=structuredClone(base);copy.trial_result=emptyTrial();copy.part_numbers=emptyPartNumbers();paItems.push({brand:'',model:'',ai_component:'',design:copy});changed=true;}
+  }
+  project.finalPas.slice(0,paItems.length).forEach((pa,i)=>{
+    const item=paItems[i];
+    // The model follows AI-Thermal's component name until it is typed in by hand.
+    if((!item.model||item.model===defaults.project.pa_model||item.model===item.ai_component)&&item.model!==pa.component){item.model=pa.component;changed=true;}
+    if(item.ai_component!==pa.component){item.ai_component=pa.component;changed=true;}
+  });
+  renderPaUi();return changed;
+}
+async function openSpec(spec){
+  const tab=window.open('','_blank');
+  try{const url=await spSync.fileUrl(spec.path);if(url&&tab)tab.location.href=url;else{tab?.close();projectMessage(`SharePoint 上找不到規格書 ${spec.name}`,true);}}
+  catch(e){tab?.close();projectMessage(`無法開啟規格書：${e.message}`,true);}
+}
+const specMenu=document.createElement('div');specMenu.className='spec-menu';specMenu.setAttribute('role','menu');specMenu.hidden=true;document.body.append(specMenu);
+function showSpecMenu(button,specs){
+  specMenu.replaceChildren(...specs.map(spec=>{const item=document.createElement('button');item.type='button';item.setAttribute('role','menuitem');item.textContent=`📄 ${spec.name}`;item.title=spec.path;item.addEventListener('click',()=>{specMenu.hidden=true;openSpec(spec);});return item;}));
+  specMenu.hidden=false;const rect=button.getBoundingClientRect();
+  specMenu.style.left=Math.max(8,Math.min(innerWidth-specMenu.offsetWidth-8,rect.left))+'px';specMenu.style.top=rect.bottom+4+'px';
+  specMenu.querySelector('button')?.focus();
+}
+document.addEventListener('pointerdown',event=>{if(!specMenu.hidden&&!specMenu.contains(event.target)&&!event.target.closest('.spec-btn'))specMenu.hidden=true;});
+document.addEventListener('keydown',event=>{if(event.key==='Escape')specMenu.hidden=true;});
+$('pa-cards').addEventListener('click',event=>{
+  const spec=event.target.closest('[data-pa-spec]');
+  if(spec){const specs=specsFor(Number(spec.dataset.paSpec));if(specs.length===1)openSpec(specs[0]);else if(specs.length)showSpecMenu(spec,specs);return;}
+  const tag=event.target.closest('[data-pa-select]');if(tag)switchPa(Number(tag.dataset.paSelect));
+});
+$('pa-switch').addEventListener('click',event=>{const button=event.target.closest('[data-pa-select]');if(button)switchPa(Number(button.dataset.paSelect));});
+$('same-part').addEventListener('click',()=>{
+  if(!multiPa())return;
+  if(!samePart&&!switchPa(0))return;
+  samePart=!samePart;renderPaUi();invalidate();
+  markDirty(samePart?'PA1、PA2 同料：共用 PA1 的設計尺寸':'已取消同料：PA1、PA2 各自設計');
+});
 function formValues(){
-  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()};d.tolerances={};
+  readPaCards();
+  const d=structuredClone(defaults);d.name=$('name').value.trim();d.project={name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:paItems[activePa].brand,pa_model:paItems[activePa].model};d.tolerances={};d.pa_set=paSetValue();
   for(const path of allPaths){
     const[group,key]=path.split('.'),v=inputFor(path).value;
     if(!v&&key!=='thickness_override')throw new Error(`${titleFor(path)} 不可留空。`);
@@ -202,16 +325,19 @@ function formValues(){
       d.tolerances[path][sign]=raw===''?0:Number(raw);
     }
   }
+  d.package.lead_count=leadCount;
   d.trial_result=structuredClone(trialRecord);d.part_numbers=structuredClone(partNumbers);
   d.copper.hole_corners=[...document.querySelectorAll('[data-hole-corner]:checked')].map(e=>e.dataset.holeCorner);
   d.pcb.opening_mode=$('pcb-auto').checked?'auto':'manual';d.pcb.opening_rule=$('pcb-rule').value;
   d.boss.size_mode=$('boss-size-auto').checked?'auto':'manual';d.boss.height_mode='auto';
   return d;
 }
-function fill(d){
+function fill(d){loadPaState(d);fillDesign(d);renderPaUi(true);}
+function fillDesign(d){
+  leadCount=d.package?.lead_count??6;renderLeads();
   trialRecord=structuredClone(d.trial_result??emptyTrial());partNumbers=structuredClone(d.part_numbers??emptyPartNumbers());renderPartNumber();
   projectMetadataValid=true;$('name').value=d.name;
-  $('project-name').value=d.project?.name??d.name??'未命名專案';$('project-id').value=d.project?.project_id??'';$('pa-brand').value=d.project?.pa_brand??'';$('pa-model').value=d.project?.pa_model??defaults.project?.pa_model??'H-37248KC-6/2';
+  $('project-name').value=d.project?.name??d.name??'未命名專案';$('project-id').value=d.project?.project_id??'';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
   document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
@@ -226,6 +352,8 @@ function syncLinkedFields(d){
   }
   const sizeAuto=d.boss.size_mode==='auto';d.boss.height_mode='auto';
   for(const key of ['lead_solder','board_solder','flange_gap']){d.stack[key]=defaults.stack[key];derivedValue(`stack.${key}`,d.stack[key],true,'製程建議定值；L 由 PCB 板厚 C、小凸台高度 K 與 PA 支撐高度 SPH 自動計算。');}
+  for(const[path,value]of Object.entries(FIXED_VALUES)){const[group,key]=path.split('.');d[group][key]=value;derivedValue(path,value,true,'製程固定值，鎖定不可修改。');}
+  d.layout.hole_clearance=holeClearanceFor(d.copper.hole_diameter);derivedValue('layout.hole_clearance',d.layout.hole_clearance,true,'V = 吊掛孔徑 D + 1 mm，自動計算。');
   for(const [key,value]of [['length',ceilTenth(d.package.length)],['width',ceilTenth(d.package.width)]]){derivedValue(`boss.${key}`,value,sizeAuto,'I/H 依 PA 設計尺寸（Typ.）向上取至 0.1 mm；取消跟隨可修改。');if(sizeAuto)d.boss[key]=value;}
   const height=d.pcb.thickness+d.stack.lead_solder+d.stack.board_solder-d.package.support_height-d.stack.flange_gap+d.stack.pad_height;
   derivedValue('boss.total_height',height,true,'L 自動計算；調整 PCB 板厚 C 或小凸台高度 K，SPH 從 PA 封裝帶入。');d.boss.total_height=height;
@@ -283,8 +411,9 @@ function autoBuild(){
 // Only this controller knows about the browser repository. CAD calculations
 // continue to use a complete Design object, ready for a future backend adapter.
 function syncProjectMetadata(){
-  const project=normalizeProject({name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:$('pa-brand').value.trim(),pa_model:$('pa-model').value.trim()});
-  for(const value of [result,draft])if(value?.results?.design)value.results.design.project=structuredClone(project);
+  readPaCards();
+  const project=normalizeProject({name:$('project-name').value.trim(),project_id:$('project-id').value.trim(),pa_brand:paItems[activePa].brand,pa_model:paItems[activePa].model});
+  for(const value of [result,draft])if(value?.results?.design){value.results.design.project=structuredClone(project);value.results.design.pa_set=paSetValue();}
   projectMetadataValid=true;refreshExportButtons();
   return project;
 }
@@ -294,7 +423,11 @@ const autoSaver=new AutoSaver({save:()=>autosaveNow()});
 const saveMode=()=>autosaveMode({enabled:$('autosave').checked,activeId:activeProjectId,name:$('project-name').value,defaultName:defaults.project.name,deletedName});
 const saveHint=()=>autosaveHint(saveMode(),!!activeProjectId);
 const autoSaving=mode=>mode==='update'||mode==='create';
-function autosaveNow(){return projectDirty&&projectMetadataValid&&autoSaving(saveMode())?saveProject(false,{auto:true}):null;}
+function autosaveNow(){
+  // A name being typed is not saved yet: a half-typed name never renames the open record.
+  if(document.activeElement===$('project-name')&&document.visibilityState==='visible'){if(projectDirty)autoSaver.schedule();return null;}
+  return projectDirty&&projectMetadataValid&&autoSaving(saveMode())?saveProject(false,{auto:true}):null;
+}
 function markDirty(message){
   projectDirty=true;const mode=saveMode();
   projectMessage(message??(mode==='off'?'有未儲存的變更':mode==='update'?'編輯中，將自動儲存':saveHint()));
@@ -306,7 +439,7 @@ function refreshProjectList(){
   select.replaceChildren(placeholder);
   for(const record of projectStore.list()){
     const option=document.createElement('option');option.value=record.id;
-    const project=record.design.project;option.textContent=`${project?.name||record.design.name}${project?.project_id?'（'+project.project_id+'）':''}${project?.pa_model?' · '+project.pa_model:''}`;select.append(option);
+    const project=record.design.project,models=record.design.pa_set?.items?.map(item=>item.model).filter(Boolean).join(' / ')||project?.pa_model;option.textContent=`${project?.name||record.design.name}${project?.project_id?'（'+project.project_id+'）':''}${models?' · '+models:''}`;select.append(option);
   }
   select.value=activeProjectId||'';$('project-delete').disabled=!activeProjectId;
 }
@@ -317,7 +450,7 @@ function saveProject(asNew=false,{auto=false}={}){
     if(!auto)clearTimeout(previewTimer);const design=calculate(syncLinkedFields(formValues())).design;
     const record=projectStore.save(design,{id:asNew?null:activeProjectId});activeProjectId=record.id;activeRecordStamp=record.updated_at;
     // Auto-save leaves the project fields alone: they may still be being typed in.
-    if(!auto){$('project-name').value=design.project.name;$('project-id').value=design.project.project_id;$('pa-brand').value=design.project.pa_brand;$('pa-model').value=design.project.pa_model;deletedName=null;}
+    if(!auto){$('project-name').value=design.project.name;$('project-id').value=design.project.project_id;for(const[i,item]of(design.pa_set?.items??[{brand:design.project.pa_brand,model:design.project.pa_model}]).entries()){paItems[i].brand=item.brand;paItems[i].model=item.model;}renderPaCards(true);deletedName=null;}
     syncProjectMetadata();refreshProjectList();
     projectDirty=false;const time=new Date(record.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
     projectMessage(`${auto?'已自動儲存':'已儲存'} ${time}${navigator.onLine===false&&spSync.isEnabled()?'；離線中，恢復連線後上傳 SharePoint':''}`);return record;
@@ -344,18 +477,43 @@ projectStore.on('change',info=>{
   try{fill(calculate(record.design).design);activeRecordStamp=record.updated_at;projectDirty=false;projectMessage(info.source==='sharepoint'?'已載入同事在 SharePoint 更新的版本':'已從資料庫資料夾載入');invalidate();submitProjectModel();}
   catch(e){projectMessage(e.message,true);}
 });
-const storageUI=setupStorageUI({db:projectStore,fileDb:localFile,sp:spSync,onNotice:message=>projectMessage(message)});
+const storageUI=setupStorageUI({db:projectStore,fileDb:localFile,sp:spSync,onNotice:message=>projectMessage(message),onAiProjects:list=>{aiList=list;renderPaUi();}});
 $('project-save').addEventListener('click',()=>saveProject());
 $('project-save-as').addEventListener('click',()=>saveProject(true));
-$('project-select').addEventListener('change',()=>{
-  const id=$('project-select').value;if(!id)return;
-  autoSaver.flush();deletedName=null;// pending edits of the open project are saved before switching
+function loadRecord(id,message='已載入儲存專案'){
+  deletedName=null;
   try{
     const record=projectStore.get(id);if(!record)throw new Error('找不到這個專案。');
     const design=calculate(record.design).design;projectStore.activate(id);activeProjectId=id;activeRecordStamp=record.updated_at;fill(design);refreshProjectList();
-    projectDirty=false;projectMessage('已載入儲存專案');invalidate();submitProjectModel();
-  }catch(e){projectMessage(e.message,true);}
+    projectDirty=false;autoSaver.cancel();projectMessage(message);invalidate();submitProjectModel();return true;
+  }catch(e){projectMessage(e.message,true);refreshProjectList();return false;}
+}
+$('project-select').addEventListener('change',()=>{
+  const id=$('project-select').value;if(!id)return;
+  autoSaver.flush();// pending edits of the open project are saved before switching
+  loadRecord(id);
 });
+// Choosing ANOTHER AI-Thermal project while a saved project is open opens that project —
+// its saved record, or a new record — and never renames or overwrites the open one.
+// (Typing any other name still renames the open project.)
+function openOtherAiProject(project){
+  const current=activeProjectId&&projectStore.get(activeProjectId);
+  if(!current)return false;// an unsaved design simply takes the chosen name
+  const currentName=current.design.project?.name??'',currentLink=current.design.pa_set?.ai_project_id??'';
+  if(currentName===project.name||currentLink===project.id)return false;
+  // The open project keeps its own name; its pending edits are saved under it first.
+  $('project-name').value=currentName;
+  if(projectDirty&&!saveProject(false,{auto:true})){projectMessage(`「${currentName}」有未完成的尺寸，未切換到「${project.name}」：請先修正。`,true);return true;}
+  const records=projectStore.list();
+  const saved=records.find(r=>r.design.pa_set?.ai_project_id===project.id)??records.find(r=>r.design.project?.name===project.name);
+  if(saved)return loadRecord(saved.id,`已開啟「${project.name}」的儲存專案；「${currentName}」保持不變`)||true;
+  // A new project: its own record, dimensions from the defaults, Final PAs from AI-Thermal.
+  autoSaver.cancel();activeProjectId=null;activeRecordStamp=null;deletedName=null;
+  const fresh=structuredClone(defaults);fresh.project={...defaults.project,name:project.name};
+  fill(fresh);applyAiProject(project);refreshProjectList();invalidate();submitProjectModel();
+  markDirty(`新專案「${project.name}」：設計尺寸從預設值開始，${saveHint()}（「${currentName}」保持不變）`);
+  return true;
+}
 $('project-delete').addEventListener('click',()=>{
   if(!activeProjectId)return;
   const shared=[localFile.isReady()&&'本機資料庫資料夾',spSync.isEnabled()&&'SharePoint'].filter(Boolean);
@@ -366,13 +524,22 @@ $('project-delete').addEventListener('click',()=>{
 });
 
 // Auto-save preference (per browser); a pending change is saved when the page is hidden or closed.
+$('project-name').addEventListener('blur',()=>{if(projectDirty&&autoSaving(saveMode()))autoSaver.schedule();});
 $('autosave').checked=readAutosavePreference();
 $('autosave').addEventListener('change',()=>{writeAutosavePreference($('autosave').checked);if(projectDirty)markDirty();else autoSaver.cancel();});
 window.addEventListener('pagehide',()=>autoSaver.flush());
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')autoSaver.flush();});
 // Project identity (header): metadata only, the verified CAD model stays valid.
-document.querySelector('.project-fields').addEventListener('input',()=>{
-  try{syncProjectMetadata();markDirty();}
+document.querySelector('.project-fields').addEventListener('input',event=>{
+  try{
+    // Choosing (or typing) an AI-Thermal project name links it: Duplex Mode, Final PAs and their specs.
+    if(event.target.id==='project-name'){
+      const match=aiList.find(p=>p.name===event.target.value.trim());
+      if(match&&openOtherAiProject(match))return;
+      if(match&&match.id!==aiProjectId)applyAiProject(match);
+    }
+    syncProjectMetadata();renderPaUi();markDirty();
+  }
   catch(e){projectMetadataValid=false;refreshExportButtons();projectMessage(e.message,true);}
 });
 $('design-form').addEventListener('input',()=>{invalidate();markDirty();});
@@ -405,6 +572,9 @@ for(const component of ['copper','preform','pcb','pa','epad']){
 $('explode').addEventListener('change',event=>viewer.setExploded(event.target.checked));
 for(const view of ['iso','iso-bottom',...faceViews])$(`view-${view}`).addEventListener('click',()=>viewer.setView(view));
 $('view-orthographic').addEventListener('click',()=>viewer.setView(viewer.lastOrthographicView||'top'));
+// PA lead count (6 with the two narrow top corner leads, or 4): display only, saved with the design.
+function renderLeads(){$('pa-leads-text').textContent=`PA ${leadCount} 腳`;$('pa-leads').dataset.leads=String(leadCount);$('pa-leads').title=leadCount===6?'PA 腳數：6 腳（含左上、右上兩隻細腳）。按下切換為 4 腳；隨專案儲存':'PA 腳數：4 腳。按下切換為 6 腳（加上左上、右上兩隻細腳）；隨專案儲存';}
+$('pa-leads').addEventListener('click',()=>{leadCount=leadCount===6?4:6;renderLeads();for(const value of [result,draft])if(value?.results?.design)value.results.design.package.lead_count=leadCount;refreshPreview();markDirty();});
 $('view-grid').addEventListener('click',()=>{viewer.setGridVisible(!viewer.grid?.visible);$('view-grid').setAttribute('aria-pressed',String(viewer.grid?.visible??false));});
 $('dimension-clear').addEventListener('click',()=>{viewer.key=null;viewer.clearAnnotation();});
 $('dimension-fit').addEventListener('click',()=>{if(viewer.key){if(viewer.toleranceFocus===viewer.key)viewer.selectTolerance(viewer.key);else viewer.selectDimension(viewer.key);}});
@@ -479,6 +649,7 @@ function renderFormulaHelp(r){
 = round(2 × ${f(c.pad_size)} + √2 × 0.2828, 2) = ${t.chamfer.toFixed(2)} mm
 採第11頁的45°幾何關係；間隙基準依目前設計設定為0.2828 mm。
 Y四捨五入到小數第二位，實際間隙 = ${f(r.corner_clearance)} mm。`);
+  setFormula('layout.hole_clearance',`V = 吊掛孔徑 D + 1 mm\n= ${f(c.hole_diameter)} + 1 = ${f(d.layout.hole_clearance)} mm\n定位孔周圍的 E-PAD 避讓直徑，跟隨吊掛孔徑。`);
   setFormula('preform.trial_delta','三款試片：Z − 0.15、Z、Z + 0.15 mm。增減量固定；製造公差另行設定。');
   const height=`L = C + A + B − SPH − D + K\n= ${f(b.thickness)} + ${f(s.lead_solder)} + ${f(s.board_solder)} − ${f(p.support_height)} − ${f(s.flange_gap)} + ${f(s.pad_height)} = ${f(r.boss_total_height)} mm\nA/B/D 為製程建議定值；調整 C、K，SPH 由 PA 帶入。`;
   for(const id of ['boss.total_height','metric-l','stack-total','boss-upper'])setFormula(id,height);
@@ -558,7 +729,8 @@ $('design-form').addEventListener('submit',async event=>{
 });
 // Output names: 專案名稱_Copper_Coin_日期 / 專案名稱_Solder_Preform_日期 /
 // 專案名稱_Coin_Solder_Masker_日期 (file-names.js).
-const fileName=(which,extension,suffix)=>outputFileName($('project-name').value,which,extension,{suffix});
+// Two PAs designed separately: PA1 and PA2 exports are told apart by _PA1 / _PA2 after the project name.
+const fileName=(which,extension,suffix)=>outputFileName($('project-name').value+(separatePas()?`_${paLabel(activePa)}`:''),which,extension,{suffix});
 // The 2D drawings (company format of drawing 348001J40001) share one template,
 // fetched once on the first export. The cover and watermark choices are remembered.
 const COVER_KEY='pa-copper-cad.drawing-cover',WATERMARK_KEY='pa-copper-cad.drawing-watermark';

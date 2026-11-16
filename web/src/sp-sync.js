@@ -65,16 +65,56 @@ const localDate = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const projectName = record => record?.design?.project?.name || '未命名專案';
 
-/** AI-Thermal's thermal_db.json → [{ id, name, band }] sorted by name (read only). */
+/**
+ * A component's SpecFile in AI-Thermal's shapes (its sgSpecList): no key, one
+ * { path, name, … } or an array of them → [{ path, name }].
+ */
+export function specList(value) {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list
+    .filter(s => s && typeof s === 'object' && typeof s.path === 'string' && s.path)
+    .map(s => ({ path: s.path, name: String(s.name || s.path.slice(s.path.lastIndexOf('/') + 1) || '規格書') }));
+}
+// AI-Thermal shows TDD 75% when an FR1 project has no Duplex Mode yet; FR2 has none.
+export const AI_THERMAL_DEFAULT_DUPLEX = 'TDD 75%';
+/**
+ * AI-Thermal's thermal_db.json → [{ id, name, band, duplex, duplexDefault, finalPas }]
+ * sorted by name (read only). finalPas: its RF components of Type "Final PA", in
+ * list order, each { component, specs: [{ path, name }] }.
+ */
 export function aiThermalProjects(db) {
   const projects = db && typeof db === 'object' ? db.projects : null;
   if (!projects || typeof projects !== 'object') return [];
   return Object.entries(projects)
     .filter(([, p]) => p && typeof p === 'object')
-    .map(([id, p]) => ({ id, name: String(p.project_name || id).trim(), band: p.band === 'FR2' ? 'FR2' : 'FR1' }))
+    .map(([id, p]) => {
+      const band = p.band === 'FR2' ? 'FR2' : 'FR1';
+      const stored = typeof p.param_duplex === 'string' ? p.param_duplex.trim() : '';
+      const finalPas = (Array.isArray(p.rf_data) ? p.rf_data : [])
+        .filter(
+          c =>
+            c &&
+            typeof c === 'object' &&
+            String(c.Type || '')
+              .trim()
+              .toLowerCase() === 'final pa',
+        )
+        .map(c => ({ component: String(c.Component || '').trim(), specs: specList(c.SpecFile) }))
+        .filter(c => c.component);
+      return {
+        id,
+        name: String(p.project_name || id).trim(),
+        band,
+        duplex: band === 'FR2' ? '' : stored || AI_THERMAL_DEFAULT_DUPLEX,
+        duplexDefault: band === 'FR1' && !stored,
+        finalPas,
+      };
+    })
     .filter(p => p.name)
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'));
 }
+// Cached lists from before Duplex Mode / Final PAs were read are downloaded again.
+const AI_THERMAL_SCHEMA = 2;
 
 export class SharePointSync {
   constructor({
@@ -676,11 +716,19 @@ export class SharePointSync {
     return (await res.json()).webUrl || null;
   }
 
+  /** SharePoint web address of a file on the Thermal-Spec-DB site (AI-Thermal's SPEC uploads). */
+  async fileUrl(path) {
+    await this.resolveSite(true);
+    const res = await this.graph(`${this.byPath(path)}?$select=webUrl`, { interactive: true, ok: s => s === 404 });
+    if (res.status === 404) return null;
+    return (await res.json()).webUrl || null;
+  }
+
   // ───────── AI-Thermal project list (read only) ─────────
   cachedAiThermal() {
     try {
       const v = JSON.parse(this.lsGet(LS_AI_THERMAL) || 'null');
-      return v && Array.isArray(v.projects) ? v : null;
+      return v && v.schema === AI_THERMAL_SCHEMA && Array.isArray(v.projects) ? v : null;
     } catch {
       return null;
     }
@@ -698,7 +746,12 @@ export class SharePointSync {
     if (!meta) throw mkErr(`SharePoint 上找不到 AI-Thermal 資料庫 ${path}`, { status: 404 });
     if (cached && cached.etag && cached.etag === meta.etag) return { ...cached, fresh: false };
     const got = await this.downloadJson(path, meta);
-    const result = { etag: got.etag, at: new Date().toISOString(), projects: aiThermalProjects(got.data) };
+    const result = {
+      schema: AI_THERMAL_SCHEMA,
+      etag: got.etag,
+      at: new Date().toISOString(),
+      projects: aiThermalProjects(got.data),
+    };
     this.lsSet(LS_AI_THERMAL, JSON.stringify(result));
     return { ...result, fresh: true };
   }

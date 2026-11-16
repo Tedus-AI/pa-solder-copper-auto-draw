@@ -79,10 +79,14 @@ async function withDeadline(operation,ms,label){
     assert.equal(chips.length,2);assert.ok(Math.abs(chips[0].top-chips[1].top)<1&&chips[1].left>chips[0].right-1,'status chips are side by side');
     assert.match(await page.locator('#status-sharepoint').textContent(),/SharePoint.*未連線/);assert.match(await page.locator('#status-local').textContent(),/本機.*瀏覽器暫存/);
     for(const selector of ['.local-badge','.topbar a[href*="github.com"]','#reset','#import','.topbar #help-open'])assert.equal(await page.locator(selector).count(),0,`${selector} removed`);
-    // Project row above the design heading; name, project ID, brand and model on one line.
-    const rows=await page.evaluate(()=>{const r=id=>document.getElementById(id).getBoundingClientRect();return{name:r('project-name'),id:r('project-id'),brand:r('pa-brand'),model:r('pa-model'),heading:document.querySelector('.control-heading').getBoundingClientRect()};});
-    assert.ok(Math.abs(rows.name.top-rows.id.top)<2&&Math.abs(rows.id.top-rows.brand.top)<2&&Math.abs(rows.brand.top-rows.model.top)<2&&rows.name.right<rows.id.left&&rows.id.right<rows.brand.left&&rows.brand.right<rows.model.left,`one row: ${JSON.stringify(rows)}`);
-    assert.ok(rows.heading.top>rows.name.bottom,'設計尺寸 heading sits below the project row');
+    // Header: two aligned rows beside the brand — 專案 | ID + Duplex | save buttons, then PA1 | (PA2) | 同料 | 自動儲存.
+    const rows=await page.evaluate(()=>{const r=el=>(typeof el==='string'?document.getElementById(el):el).getBoundingClientRect();return{brand:r(document.querySelector('.brand')),name:r(document.querySelector('.project-name-field')),id:r('project-id'),duplex:r('duplex-chip'),save:r('project-save'),card:r(document.querySelector('.pa-card')),auto:r(document.querySelector('.autosave-row')),version:r('app-version'),heading:document.querySelector('.control-heading').getBoundingClientRect()};});
+    assert.ok(Math.abs(rows.name.top-rows.id.top)<2&&Math.abs(rows.id.top-rows.duplex.top)<2&&rows.name.right<rows.id.left&&rows.id.right<rows.duplex.left&&rows.duplex.right<rows.save.left,`first row: ${JSON.stringify(rows)}`);
+    assert.ok(rows.card.top>rows.name.bottom&&Math.abs(rows.card.left-rows.name.left)<1&&Math.abs((rows.auto.top+rows.auto.bottom)-(rows.card.top+rows.card.bottom))<2&&rows.auto.left<rows.save.left+1,`second row starts under 專案: ${JSON.stringify(rows)}`);
+    assert.ok(rows.brand.height>=rows.card.bottom-rows.name.top-1&&rows.version.top>rows.name.bottom-6,'brand and version span both rows');
+    assert.match(await page.locator('#app-build-date').textContent(),/^更新 \d{4}\/\d{1,2}\/\d{1,2}$/);
+    assert.equal(await page.locator('#duplex-value').textContent(),'—');
+    assert.ok(rows.heading.top>rows.card.bottom,'設計尺寸 heading sits below the header');
     await page.locator('#project-options-toggle').click();assert.equal(await page.locator('#project-options').isVisible(),true);assert.match(await page.locator('#project-options').textContent(),/SharePoint/);
     await page.mouse.click(5,300);assert.equal(await page.locator('#project-options').isVisible(),false,'clicking elsewhere closes the list');
     // Selected thickness Z shows its tolerance as text; the inputs appear only when tolerances are unlocked.
@@ -215,11 +219,12 @@ async function withDeadline(operation,ms,label){
     assert.equal(JSON.parse(await page.locator('#viewer').getAttribute('data-annotation-layout')).kind,'envelope');
     assert.equal(await page.locator('.dimension-arrow').count(),0,'PA tolerance shows max outline and a label, not a +/- segment');
     await page.locator('.viewer-panel').screenshot({path:path.join(output,'pa-tolerance-envelope.png')});
-    await page.locator('#stack-pad_height').fill('0.18');
-    await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.51);
+    // O/J/K/R/S/T are process-fixed (locked like A/B/D); V = D + 1 is computed.
+    for(const id of ['pcb-relief_diameter','copper-pad_size','stack-pad_height','layout-border_width','layout-epad_size','layout-web_width','layout-hole_clearance'])assert.equal(await page.locator('#'+id).getAttribute('readonly'),'',id+' is locked');
+    assert.match(await formula('layout.hole_clearance'),/V = 吊掛孔徑 D \+ 1 mm/);await page.keyboard.press('Escape');
     await page.locator('#pcb-thickness').fill('2.1');
-    await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.61);
-    assert.match(await formula('boss.total_height'),/0\.61/);await page.keyboard.press('Escape');
+    await page.waitForFunction(()=>Number(document.getElementById('boss-total_height').value)===.58);
+    assert.match(await formula('boss.total_height'),/0\.58/);await page.keyboard.press('Escape');
     await page.locator('#calculation-guide-open').click();
     const hRow=page.locator('.guide-table tbody tr').filter({hasText:'基座至 PA 底面高度'});
     assert.equal(await hRow.locator('td').last().textContent(),'0.73 mm');
@@ -574,11 +579,11 @@ async function withDeadline(operation,ms,label){
     await page.reload({waitUntil:'networkidle'});await modelReady();assert.equal(await page.locator('#trial-choice').inputValue(),'upper');assert.equal(await page.locator('#trial-choice').isDisabled(),true);
     assert.equal(await page.locator('#preform-thickness_override').inputValue(),'0.54');assert.match(await page.locator('#trial-result-status').textContent(),/已鎖定 0\.54 mm/);await page.locator('.trial-selection').screenshot({path:path.join(output,'trial-locked.png')});
     const trialEvent=page.waitForEvent('download');await page.locator('#download-zip').click();const trialPath=path.join(output,'validated-upper.zip');await(await trialEvent).saveAs(trialPath);const trialFiles=unzipSync(fs.readFileSync(trialPath)),trialReport=JSON.parse(strFromU8(trialFiles['creo_job.json']));assert.equal(trialReport.derived.trial_status,'locked');assert.ok(Math.abs(trialReport.derived.model_thickness-trialReport.derived.calculated_thickness-.15)<1e-10);
-    await page.locator('#copper-pad_size').fill('1.6');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
+    await page.locator('#pcb-thickness').fill('2.2');await page.waitForFunction(()=>document.getElementById('trial-result-status').dataset.status==='stale');await page.locator('#generate').click();assert.match(await page.locator('#error').textContent(),/重新驗證|解鎖/);assert.equal(await page.locator('#download-zip').isDisabled(),true);
     // The unlock is saved at once when auto-save already stored the edit, otherwise by auto-save (which may run during modelReady).
     await page.locator('#trial-lock').click();await modelReady();assert.equal(await page.locator('#trial-choice').isDisabled(),false);await page.waitForFunction(()=>/^(試片已解鎖並儲存|已自動儲存 )/.test(document.getElementById('project-save-status').textContent),null,{timeout:10000});assert.equal(await page.locator('#trial-result-status').getAttribute('data-status'),'unlocked');
-    await focusNominal('copper.pad_size');await page.locator('#copper-pad_size').fill('4'); await page.locator('#generate').click();
-    await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /削角/);
+    await focusNominal('copper.hole_edge_offset');await page.locator('#copper-hole_edge_offset').fill('25'); await page.locator('#generate').click();
+    await page.locator('#error').waitFor(); assert.match(await page.locator('#error').textContent(), /吊掛孔/);
     assert.equal(await page.locator('#download-zip').isDisabled(), true);
     await resetToDefaults();
     await page.setViewportSize({ width: 390, height: 844 });
@@ -613,6 +618,76 @@ async function withDeadline(operation,ms,label){
       await review.screenshot({path:path.join(output,`dimensions-review-${i/7+1}.png`),fullPage:true});
     }
     await review.close();
+    // Two Final PAs from AI-Thermal (its cached project list): Duplex Mode, PA1/PA2 each with its own
+    // dimensions, _PA1/_PA2 export names, 同料 (one set from PA1), PA lead count, saved and restored.
+    const AI={schema:2,etag:'e',at:'2026-11-16T00:00:00Z',projects:[{id:'fdd',name:'FDD B1B3 4T4R 480W',band:'FR1',duplex:'FDD 100%',duplexDefault:false,finalPas:[{component:'WGC18630-Final-B3',specs:[{path:'/ToolDatabase/SPEC/x/a.pdf',name:'a.pdf'}]},{component:'WGC-22630-Final-B1',specs:[{path:'/ToolDatabase/SPEC/x/b.pdf',name:'b.pdf'},{path:'/ToolDatabase/SPEC/x/c.pdf',name:'c.pdf'}]}]}]};
+    const multi=await browser.newPage({viewport:{width:1920,height:1080},locale:'zh-TW',acceptDownloads:true});multi.on('pageerror',e=>errors.push(e.message));
+    await multi.addInitScript(ai=>{if(!sessionStorage.getItem('seeded')){localStorage.setItem('pa-copper-cad.ai-thermal-projects',JSON.stringify(ai));sessionStorage.setItem('seeded','1');}},AI);
+    await multi.goto(url,{waitUntil:'networkidle'});
+    const value=id=>multi.locator('#'+id).inputValue();
+    assert.equal(await multi.locator('.pa-card').count(),1);assert.equal(await multi.locator('#same-part').isVisible(),false);assert.equal(await multi.locator('#pa-switch').isVisible(),false);
+    assert.equal(await multi.locator('#duplex-value').textContent(),'—');
+    await multi.locator('#project-name').fill('FDD B1B3 4T4R 480W');
+    await multi.waitForFunction(()=>document.querySelectorAll('.pa-card').length===2);
+    assert.equal(await multi.locator('#duplex-value').textContent(),'FDD 100%');
+    assert.equal(await value('pa-model'),'WGC18630-Final-B3');assert.equal(await value('pa-model-2'),'WGC-22630-Final-B1');
+    assert.equal(await multi.locator('[data-pa-spec="0"]').isDisabled(),false);assert.match(await multi.locator('[data-pa-spec="1"]').textContent(),/2 份/);
+    await multi.locator('[data-pa-spec="1"]').click();assert.equal(await multi.locator('.spec-menu button').count(),2,'two specifications: choose one');await multi.keyboard.press('Escape');
+    await multi.locator('#pa-brand').fill('WGC');await multi.locator('#pa-brand-2').fill('WGC');
+    for(const width of [1920,1536]){
+      await multi.setViewportSize({width,height:width===1920?1080:864});
+      assert.ok(await multi.locator('.topbar').evaluate(e=>e.scrollWidth<=e.clientWidth+1),`header fits at ${width}`);
+      for(const id of ['pa-model','pa-model-2','project-name'])assert.ok(await multi.locator('#'+id).evaluate(e=>e.scrollWidth<=e.clientWidth+1),`${id} is shown in full at ${width}`);
+      await multi.locator('.topbar').screenshot({path:path.join(output,`header-two-pa-${width}.png`)});
+    }
+    await multi.setViewportSize({width:1920,height:1080});
+    await multi.locator('#pa-switch [data-pa-select="1"]').click();
+    assert.equal(await multi.locator('#viewer-pa').textContent(),'PA2');assert.match(await multi.locator('.pa-card[data-pa="1"]').getAttribute('class'),/active/);
+    await multi.locator('#package-length').fill('18.5');
+    await multi.waitForFunction(()=>document.getElementById('boss-length').value==='18.5');
+    await multi.locator('#pa-leads').click();assert.equal(await multi.locator('#pa-leads').textContent(),'PA 4 腳');
+    await multi.waitForFunction(()=>!document.getElementById('download-drawing').disabled);
+    const pa2Drawing=multi.waitForEvent('download');await multi.locator('#download-drawing').click();assert.match((await pa2Drawing).suggestedFilename(),/^FDD B1B3 4T4R 480W_PA2_Copper_Coin_\d{8}\.dxf$/);
+    await multi.locator('#pa-switch [data-pa-select="0"]').click();
+    assert.equal(await value('package-length'),'20.57','PA1 keeps its own dimensions');assert.equal(await multi.locator('#pa-leads').textContent(),'PA 6 腳');
+    await multi.locator('#pa-switch [data-pa-select="1"]').click();assert.equal(await value('package-length'),'18.5');
+    // 同料: PA1's dimensions serve both and one set is exported; PA2's are kept.
+    await multi.locator('#same-part').click();
+    assert.equal(await multi.locator('#same-part').getAttribute('aria-pressed'),'true');assert.equal(await value('package-length'),'20.57');
+    assert.equal(await multi.locator('#pa-switch [data-pa-select]').count(),0);assert.match(await multi.locator('#viewer-pa').textContent(),/PA1\s*PA2/);
+    await multi.locator('.topbar').screenshot({path:path.join(output,'header-same-part.png')});
+    await multi.waitForFunction(()=>!document.getElementById('download-drawing').disabled);
+    const sameDrawing=multi.waitForEvent('download');await multi.locator('#download-drawing').click();assert.match((await sameDrawing).suggestedFilename(),/^FDD B1B3 4T4R 480W_Copper_Coin_\d{8}\.dxf$/);
+    await multi.locator('#same-part').click();await multi.locator('#pa-switch [data-pa-select="1"]').click();assert.equal(await value('package-length'),'18.5','PA2 dimensions come back');
+    await multi.waitForFunction(()=>/^已自動儲存 /.test(document.getElementById('project-save-status').textContent),null,{timeout:10000});
+    await multi.reload({waitUntil:'networkidle'});
+    assert.equal(await multi.locator('.pa-card').count(),2);assert.equal(await multi.locator('#viewer-pa').textContent(),'PA2');
+    assert.equal(await value('package-length'),'18.5');assert.equal(await multi.locator('#pa-leads').textContent(),'PA 4 腳');assert.equal(await value('pa-brand-2'),'WGC');
+    await multi.locator('#pa-switch [data-pa-select="0"]').click();assert.equal(await value('package-length'),'20.57');
+    assert.match(await multi.locator('#project-select option:checked').textContent(),/WGC18630-Final-B3 \/ WGC-22630-Final-B1/);
+    await multi.screenshot({path:path.join(output,'two-pa.png')});
+    await multi.close();
+    // Choosing another AI-Thermal project opens it (its own record) and never renames or overwrites the open one.
+    const switcher=await browser.newPage({viewport:{width:1920,height:1080},locale:'zh-TW'});switcher.on('pageerror',e=>errors.push(e.message));
+    const TWO={schema:2,etag:'e',at:'2026-11-16T00:00:00Z',projects:['A','B'].map(k=>({id:k,name:`專案${k}`,band:'FR1',duplex:'TDD 75%',duplexDefault:false,finalPas:[]}))};
+    await switcher.addInitScript(ai=>{if(!sessionStorage.getItem('seeded')){localStorage.setItem('pa-copper-cad.ai-thermal-projects',JSON.stringify(ai));sessionStorage.setItem('seeded','1');}},TWO);
+    await switcher.goto(url,{waitUntil:'networkidle'});
+    const pick=async name=>{await switcher.locator('#project-options-toggle').click();await switcher.locator(`#project-options li[data-name="${name}"]`).dispatchEvent('pointerdown');};
+    const E=()=>switcher.locator('#copper-base_length').inputValue();
+    const autoSaved=()=>switcher.waitForFunction(()=>/^已自動儲存 /.test(document.getElementById('project-save-status').textContent),null,{timeout:10000});
+    await pick('專案A');await switcher.locator('#copper-base_length').fill('41');await autoSaved();
+    await pick('專案B');assert.equal(await E(),'40','a new project starts from the defaults');assert.match(await switcher.locator('#project-save-status').textContent(),/新專案「專案B」.*「專案A」保持不變/);
+    await switcher.locator('#copper-base_length').fill('45');await autoSaved();
+    assert.deepEqual((await switcher.locator('#project-select option').allTextContents()).slice(1).map(t=>t.split(' · ')[0]).sort(),['專案A','專案B'],'two records');
+    await pick('專案A');assert.equal(await switcher.locator('#project-name').inputValue(),'專案A');assert.equal(await E(),'41','A keeps its own dimensions');
+    await pick('專案B');assert.equal(await E(),'45');
+    // A half-typed name is not saved while it is typed: the open record keeps its name until the field is left.
+    await switcher.locator('#project-name').fill('專案');await switcher.waitForTimeout(2600);
+    assert.ok((await switcher.locator('#project-select option').allTextContents()).some(t=>t.startsWith('專案B')),'no rename while typing');
+    await switcher.locator('#project-name').fill('專案B');await switcher.locator('#copper-base_width').focus();
+    await switcher.locator('#project-select').selectOption({label:(await switcher.locator('#project-select option').allTextContents()).find(t=>t.startsWith('專案A'))});
+    assert.equal(await E(),'41');assert.equal(await switcher.locator('#project-name').inputValue(),'專案A');
+    await switcher.close();
     assert.deepEqual(errors, []);
     const coverage=liveSmoke?'eight representative dimensions':shardCount>1?`${annotationNames.length} dimensions (shard ${shardIndex+1}/${shardCount})`:'all 32 dimensions';
     console.log(`PASS: ${url} — ${coverage} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with plain markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);

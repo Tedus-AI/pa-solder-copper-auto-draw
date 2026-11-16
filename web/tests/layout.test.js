@@ -29,10 +29,13 @@ test('outer R mask band and hole D-to-V annulus are covered',()=>{
   }
 });
 test('mask settings cannot alter copper/preform manufacturing volumes',()=>{
-  const d=structuredClone(defaults);d.layout.epad_size=2;d.layout.web_width=.4;d.layout.border_width=1.5;
-  const changed=calculate(d),cg=layoutGeometry(changed);
+  // R/S/T are process-fixed now; the Layout generator still follows whatever mask values it is given.
+  const changed=structuredClone(r);changed.design.layout={...changed.design.layout,epad_size:2,web_width:.4,border_width:1.5};
+  const cg=layoutGeometry(changed);
   near(changed.copper_volume,r.copper_volume);near(changed.model_thickness,r.model_thickness);
   assert.notEqual(cg.cells.length,g.cells.length);
+  const d=structuredClone(defaults);d.layout.epad_size=2;d.layout.web_width=.4;d.layout.border_width=1.5;
+  assert.deepEqual(calculate(d).design.layout,r.design.layout,'calculate() restores the fixed R/S/T');
 });
 test('PCB reference only contains its PA window, not copper mounting holes',()=>{
   assert.equal(g.board.length,1);assert.equal(g.board[0].length,2);
@@ -64,8 +67,8 @@ test('Layout DXF carries no notes: only the PA centre circle and its distances t
   assert.ok(Math.abs(at('10')-(23.4-20))<1e-9&&Math.abs(at('20')-(12.6-15))<1e-9&&at('40')===.5,'small circle at the PA centre');
 });
 test('invalid keepout and excessively dense array rejected',()=>{
-  const d=structuredClone(defaults);d.layout.hole_clearance=2;assert.ok(calculate(d).warnings.some(w=>w.includes('避讓')));
-  d.layout.hole_clearance=4;d.layout.epad_size=.01;d.layout.web_width=.01;assert.throws(()=>layoutGeometry(calculate(d)),/12000/);
+  const d=structuredClone(defaults);d.layout.hole_clearance=2;assert.equal(calculate(d).design.layout.hole_clearance,4,'V = D + 1 regardless of input');
+  const dense=structuredClone(r);dense.design.layout={...dense.design.layout,epad_size:.01,web_width:.01};assert.throws(()=>layoutGeometry(dense),/12000/);
 });
 test('reference assembly stack exactly preserves A B C D K and SPH',()=>{
   const z=referenceLevels(r);

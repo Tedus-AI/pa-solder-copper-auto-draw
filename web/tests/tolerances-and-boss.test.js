@@ -48,12 +48,12 @@ test('boss has independent source-toleranced dimensions, relative XY placement a
  const q=dimensionFor('package.length',shifted);near((q.a[0]+q.b[0])/2,3);
  const job=nativeJob(shifted);assert.equal(job.native_parameters.copper.BOSS_X,3);assert.equal(job.native_parameters.copper.BOSS_Y,2);
  d.boss.size_mode='manual';d.boss.length=20.8;d.boss.width=10;const manual=calculate(d);near(manual.design.preform.length,20.8);near(manual.design.preform.width,10);assert.notEqual(manual.model_thickness,original.model_thickness);
- d.stack.pad_height=.2;const pads=calculate(d);near(pads.boss_total_height,.53);near(pads.boss_lower_height,.33);
- const z=referenceLevels(pads);near(z.pad-z.boss,.2);near(z.lead-z.pcbTop,.1);
+ d.stack.pad_height=.2;const pads=calculate(d);near(pads.boss_total_height,.48);near(pads.boss_lower_height,.33);
+ const z=referenceLevels(pads);near(z.pad-z.boss,.15);near(z.lead-z.pcbTop,.1);
  d.boss.center_from_left=35;assert.throws(()=>calculate(d),/凸台/);
 });
 test('PPT p6 L always regenerates from PCB thickness and K with fixed process values',()=>{
  const d=structuredClone(defaults);d.boss.total_height=9;near(calculate(d).boss_total_height,.48);
- d.pcb.thickness=2.2;near(calculate(d).boss_total_height,.68);d.stack.pad_height=.2;near(calculate(d).boss_total_height,.73);
+ d.pcb.thickness=2.2;near(calculate(d).boss_total_height,.68);d.stack.pad_height=.2;near(calculate(d).boss_total_height,.68);
  d.boss.height_mode='manual';assert.throws(()=>calculate(d),/第六頁/);
 });

@@ -10,9 +10,9 @@ test('worksheet reproduces PDF p13 volume subtraction and distinguishes trial in
   assert.equal(row('ΔZ').reference,.15);assert.equal(row('ΔZ').value,.15);
 });
 test('worksheet follows current dimensions and keeps computed Z independent of model override',()=>{
-  const d=structuredClone(defaults);d.pcb.thickness=2.1;d.stack.pad_height=.18;d.trial_result.choice='upper';
+  const d=structuredClone(defaults);d.pcb.thickness=2.1;d.trial_result.choice='upper';
   const r=calculate(d),rows=calculationWorksheet(r),row=s=>rows.find(v=>v.symbol===s);
-  assert.ok(Math.abs(row('h').value-.73)<1e-10);assert.ok(Math.abs(row('L').value-.61)<1e-10);
+  assert.ok(Math.abs(row('h').value-.73)<1e-10);assert.ok(Math.abs(row('L').value-.58)<1e-10);
   assert.equal(row('Z').value,r.calculated_thickness);assert.notEqual(row('Z').value,r.model_thickness);
   assert.equal(row('h').reference,.63);
 });
