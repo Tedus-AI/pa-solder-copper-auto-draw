@@ -83,7 +83,9 @@ export function fakeGraph({ siteId = 'site-1', user = '同事' } = {}) {
     if (method === 'GET') {
       if (path === 'PA_Copper_CAD' && files.size)
         return json(200, { webUrl: 'https://example.sharepoint.com/PA_Copper_CAD' });
-      return f ? json(200, meta(path, f)) : json(404, { error: { code: 'itemNotFound' } });
+      return f
+        ? json(200, { ...meta(path, f), webUrl: `https://example.sharepoint.com/${path}` })
+        : json(404, { error: { code: 'itemNotFound' } });
     }
     return json(400, {});
   }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaults, calculate, ceilTenth, nativeJob, octagon, STANDING_NOTES } from '../src/design.js';
+import { defaults, calculate, ceilTenth, nativeJob, octagon, STANDING_NOTES, FIXED_VALUES, paDesign, MAX_PAS } from '../src/design.js';
+import { chamferFor } from '../src/preform-rules.js';
 import { drawing } from '../src/dxf.js';
 const near = (a, b, tol = 1e-6) => assert.ok(Math.abs(a - b) < tol, `${a} != ${b}`);
 
@@ -18,9 +19,24 @@ test('ceiling and selected upper trial thickness', () => {
   const d = structuredClone(defaults); d.trial_result.choice = 'upper';
   const r = calculate(d); near(r.model_thickness,r.calculated_thickness+.15);
 });
-for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'pad_size', 4], ['copper', 'hole_edge_offset', 25], ['stack', 'flange_gap', .1], ['preform', 'thickness_override', -1]]) {
+for (const [group, key, value] of [['package', 'length', NaN], ['pcb', 'thickness', true], ['pcb', 'opening_length', 20], ['copper', 'base_width', 8], ['copper', 'base_thickness', 2.9], ['copper', 'hole_edge_offset', 25], ['stack', 'flange_gap', .1], ['preform', 'thickness_override', -1]]) {
   test(`invalid ${group}.${key} rejected`, () => { const d = structuredClone(defaults); d.pcb.opening_mode='manual';d[group][key] = value; assert.throws(() => calculate(d)); });
 }
+test('process-fixed O/J/K/R/S/T are applied on load and V follows D + 1', () => {
+  const d = structuredClone(defaults);
+  d.pcb.relief_diameter = 3;
+  d.copper.pad_size = 2;
+  d.stack.pad_height = 0.2;
+  d.layout = { border_width: 2, epad_size: 2, web_width: 0.5, hole_clearance: 9 };
+  d.copper.hole_diameter = 3.5;
+  const r = calculate(d);
+  for (const [path, value] of Object.entries(FIXED_VALUES)) {
+    const [group, key] = path.split('.');
+    assert.equal(r.design[group][key], value, path);
+  }
+  assert.equal(r.design.layout.hole_clearance, 4.5);
+  assert.equal(r.design.preform.chamfer, chamferFor(1.5));
+});
 test('name and unknown settings rejected', () => {
   assert.throws(() => calculate({ ...defaults, name: '../../bad' }));
   assert.throws(() => calculate({ ...defaults, surprise: true }));
@@ -141,4 +157,69 @@ test('standing notes come first; a design adds its own warnings after them', () 
   const warnings = calculate(tight).warnings;
   assert.deepEqual(warnings.slice(0, STANDING_NOTES.length), [...STANDING_NOTES]);
   assert.ok(warnings.slice(STANDING_NOTES.length).some(w => /干涉/.test(w)));
+});
+
+test('two Final PAs: the active PA is the top level, the other keeps its own complete design', () => {
+  const pa2 = paDesign(defaults);
+  pa2.package.length = 18.5;
+  pa2.copper.hole_diameter = 3.5;
+  const d = structuredClone(defaults);
+  d.project.pa_brand = 'WGC';
+  d.project.pa_model = 'WGC18630-Final-B3';
+  d.pa_set = {
+    active: 0,
+    same_part: false,
+    ai_project_id: 'fdd',
+    items: [
+      { brand: 'stale', model: 'stale', ai_component: 'WGC18630-Final-B3', design: { anything: true } },
+      { brand: ' WGC ', model: 'WGC-22630-Final-B1', ai_component: 'WGC-22630-Final-B1', design: pa2 },
+    ],
+  };
+  const set = calculate(d).design.pa_set;
+  assert.equal(MAX_PAS, 2);
+  assert.deepEqual(
+    set.items.map(item => [item.brand, item.model]),
+    [
+      ['WGC', 'WGC18630-Final-B3'],
+      ['WGC', 'WGC-22630-Final-B1'],
+    ],
+    'the active PA takes the project fields; text is trimmed',
+  );
+  assert.equal(set.items[0].design, null, 'the active PA is the top level, not stored twice');
+  assert.equal(set.items[1].design.package.length, 18.5);
+  assert.equal(set.items[1].design.layout.hole_clearance, 4.5, 'the other PA is normalized too (V = D + 1)');
+  assert.equal(set.items[1].design.project, undefined);
+  assert.equal(set.items[1].design.pa_set, undefined);
+  // Saved and loaded again it is unchanged.
+  assert.deepEqual(calculate(JSON.parse(JSON.stringify(calculate(d).design))).design.pa_set, set);
+  assert.equal(
+    calculate({ ...structuredClone(defaults), pa_set: null }).design.pa_set,
+    null,
+    'one PA keeps the original shape',
+  );
+});
+test('PA set rules: count, active index, same part on PA1 and a complete design for the other PA', () => {
+  const pa2 = paDesign(defaults);
+  const set = extra => ({
+    active: 0,
+    same_part: false,
+    ai_project_id: '',
+    items: [
+      { brand: '', model: 'A', ai_component: '', design: null },
+      { brand: '', model: 'B', ai_component: '', design: pa2 },
+    ],
+    ...extra,
+  });
+  const run = pa_set => calculate({ ...structuredClone(defaults), pa_set });
+  assert.equal(run(set({ same_part: true })).design.pa_set.same_part, true);
+  assert.throws(() => run(set({ same_part: true, active: 1, items: set().items.reverse() })), /PA1/);
+  assert.throws(() => run(set({ active: 2 })), /目前 PA/);
+  assert.throws(() => run(set({ items: [...set().items, set().items[1]] })), /PA 數量/);
+  assert.throws(() => run(set({ items: [set().items[0], { model: 'B', design: null }] })), /PA2 缺少設計尺寸/);
+  const broken = paDesign(defaults);
+  broken.package.length = -1;
+  assert.throws(() => run(set({ items: [set().items[0], { model: 'B', design: broken }] })), /^Error: PA2：/);
+  assert.throws(() => run(set({ extra: 1 })), /未知 PA 設定欄位/);
+  const single = run({ active: 0, ai_project_id: 'p', items: [{ model: 'A' }] }).design.pa_set;
+  assert.equal(single.same_part, false, 'one PA is never a same-part pair');
 });

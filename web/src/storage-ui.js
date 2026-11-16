@@ -41,7 +41,7 @@ export function localChip(status, savedInCacheAt) {
   return { state: 'warn', mark: '!', text: savedInCacheAt ? `瀏覽器暫存 ${time(savedInCacheAt)}` : '瀏覽器暫存' };
 }
 
-export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
+export function setupStorageUI({ db, fileDb, sp, onNotice = () => {}, onAiProjects = () => {} }) {
   const dialog = $('settings-dialog');
   let cacheSavedAt = null;
   let aiProjects = sp.cachedAiThermal()?.projects ?? [];
@@ -275,6 +275,7 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
         $('settings-ai-state').textContent = aiState;
         aiLoading = null;
         combobox.refresh();
+        onAiProjects(aiProjects);
       }
     })();
     return aiLoading;
@@ -349,7 +350,7 @@ export function setupStorageUI({ db, fileDb, sp, onNotice = () => {} }) {
     });
     await sp.tryRestore();
   }
-  return { start, open, renderLocal, renderSharePoint, loadAiProjects, combobox };
+  return { start, open, renderLocal, renderSharePoint, loadAiProjects, combobox, aiProjects: () => aiProjects };
 }
 
 /** Text input + ▾ list of AI-Thermal projects (filtered by what is typed). */

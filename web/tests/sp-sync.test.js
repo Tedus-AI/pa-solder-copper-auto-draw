@@ -150,15 +150,57 @@ test("AI-Thermal's project list is read only and downloaded again only when its 
   graph.write(
     'ToolDatabase/thermal_db.json',
     JSON.stringify({
-      projects: { p2: { project_name: 'RRU B', band: 'FR2' }, p1: { project_name: 'RRU A' }, bad: null },
+      projects: {
+        p2: { project_name: 'RRU B', band: 'FR2', param_duplex: 'TDD 75%' },
+        p1: { project_name: 'RRU A' },
+        p3: {
+          project_name: 'RRU C',
+          param_duplex: 'FDD 100%',
+          rf_data: [
+            { Component: 'Driver-1', Type: 'Driver' },
+            {
+              Component: 'WGC18630-Final-B3',
+              Type: 'Final PA',
+              SpecFile: { path: '/ToolDatabase/SPEC/C/RF/a.pdf', name: 'a.pdf' },
+            },
+            {
+              Component: 'WGC-22630-Final-B1',
+              Type: 'Final PA',
+              SpecFile: [
+                { path: '/ToolDatabase/SPEC/C/RF/b.pdf' },
+                { path: '/ToolDatabase/SPEC/C/RF/c.pdf', name: 'c.pdf' },
+                {},
+              ],
+            },
+          ],
+        },
+        bad: null,
+      },
       rf_library: {},
     }),
   );
   const { sp } = setup(graph);
   const first = await sp.readAiThermalProjects();
   assert.deepEqual(first.projects, [
-    { id: 'p1', name: 'RRU A', band: 'FR1' },
-    { id: 'p2', name: 'RRU B', band: 'FR2' },
+    { id: 'p1', name: 'RRU A', band: 'FR1', duplex: 'TDD 75%', duplexDefault: true, finalPas: [] },
+    { id: 'p2', name: 'RRU B', band: 'FR2', duplex: '', duplexDefault: false, finalPas: [] },
+    {
+      id: 'p3',
+      name: 'RRU C',
+      band: 'FR1',
+      duplex: 'FDD 100%',
+      duplexDefault: false,
+      finalPas: [
+        { component: 'WGC18630-Final-B3', specs: [{ path: '/ToolDatabase/SPEC/C/RF/a.pdf', name: 'a.pdf' }] },
+        {
+          component: 'WGC-22630-Final-B1',
+          specs: [
+            { path: '/ToolDatabase/SPEC/C/RF/b.pdf', name: 'b.pdf' },
+            { path: '/ToolDatabase/SPEC/C/RF/c.pdf', name: 'c.pdf' },
+          ],
+        },
+      ],
+    },
   ]);
   assert.equal(first.fresh, true);
   const downloads = () => graph.calls.filter(c => c.includes('thermal_db.json:/content')).length;
@@ -171,4 +213,16 @@ test("AI-Thermal's project list is read only and downloaded again only when its 
     'never written',
   );
   assert.deepEqual(aiThermalProjects({ projects: [] }), []);
+  // AI-Thermal's uploaded specifications open by their SharePoint web address.
+  graph.write('ToolDatabase/SPEC/C/RF/a.pdf', 'pdf');
+  assert.equal(
+    await sp.fileUrl('/ToolDatabase/SPEC/C/RF/a.pdf'),
+    'https://example.sharepoint.com/ToolDatabase/SPEC/C/RF/a.pdf',
+  );
+  assert.equal(await sp.fileUrl('/ToolDatabase/SPEC/C/RF/missing.pdf'), null);
+  // A list cached before Duplex Mode and Final PAs were read is downloaded again.
+  const cached = JSON.parse(sp.lsGet('pa-copper-cad.ai-thermal-projects'));
+  sp.lsSet('pa-copper-cad.ai-thermal-projects', JSON.stringify({ ...cached, schema: undefined }));
+  assert.equal(sp.cachedAiThermal(), null);
+  assert.equal((await sp.readAiThermalProjects()).fresh, true);
 });
