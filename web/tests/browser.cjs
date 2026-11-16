@@ -716,7 +716,7 @@ async function withDeadline(operation,ms,label){
       viewer.open([{path:'/SPEC/a.pdf',name:'a.pdf'},{path:'/SPEC/b.docx',name:'b.docx'}],0,'PA2 · WGC-22630-Final-B1');`});
     await viewerPage.locator('.spec-view-body iframe').waitFor();
     assert.match(await viewerPage.locator('.spec-view-body iframe').getAttribute('src'),/^blob:.*#toolbar=1&navpanes=1&pagemode=thumbs$/);
-    assert.match(await viewerPage.locator('.spec-view-sub').textContent(),/PA2 · WGC-22630-Final-B1　·　第 1 \/ 2 份　·　2\.3 MB/);
+    assert.match(await viewerPage.locator('.spec-view-sub').textContent(),/PA2 · WGC-22630-Final-B1\u3000·\u3000第 1 \/ 2 份\u3000·\u30002\.3 MB/);
     await viewerPage.locator('#under').fill('still editable');assert.equal(await viewerPage.locator('#under').inputValue(),'still editable','not modal');
     await viewerPage.locator('.spec-view-tab').nth(1).click();await viewerPage.locator('.spec-view-msg a').waitFor();
     assert.match(await viewerPage.locator('.spec-view-msg a').getAttribute('href'),/^https:\/\/sp\/\/SPEC\/b\.docx$/,'Office files open in Office Online');
