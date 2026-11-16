@@ -21,7 +21,7 @@ def test_invalid_form_clears_stale_download():
     app = AppTest.from_file(str(APP), default_timeout=90).run()
     app.button[0].click().run()
     assert "generated" in app.session_state
-    app.number_input(key="copper.pad_size").set_value(4.0)
+    app.number_input(key="copper.hole_edge_offset").set_value(25.0)
     app.button[0].click().run()
     assert not app.exception
     assert app.error

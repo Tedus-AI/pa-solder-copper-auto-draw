@@ -46,7 +46,7 @@ def test_stack_changes_gap_and_volume(data):
 
 @pytest.mark.parametrize("group,field,value", [
     ("package", "length", float("nan")), ("pcb", "thickness", True),
-    ("copper", "base_width", 8), ("copper", "pad_size", 4),
+    ("copper", "base_width", 8), ("package", "lead_count", 5),
     ("copper", "base_thickness", 2.9), ("copper", "hole_edge_offset", 0),
     ("stack", "flange_gap", .1),
      ("preform", "thickness_override", -1),
@@ -110,10 +110,12 @@ def test_trial_conflict_and_clearance_visible(data):
 
 def test_browser_layout_metadata_roundtrip_preserves_manufacturing_geometry(data):
     original = calculate(Design.from_mapping(data))
-    data["layout"] = {"border_width": 1.5, "epad_size": 2, "web_width": .4, "hole_clearance": 4}
+    data["layout"] = {"border_width": 1.5, "epad_size": 2, "web_width": .4, "hole_clearance": 9}
     design = Design.from_mapping(data)
     updated = calculate(design)
-    assert design.to_mapping()["layout"] == data["layout"]
+    # R/S/T are process-fixed and V = D + 1 mm, as in web/src/design.js.
+    assert design.to_mapping()["layout"] == {"border_width": 1.0, "epad_size": 1.5, "web_width": .3,
+                                             "hole_clearance": design.copper.hole_diameter + 1}
     assert updated.boss_volume == original.boss_volume
     assert updated.model_thickness == original.model_thickness
 
@@ -205,7 +207,7 @@ console.log(JSON.stringify(calculate(d).design));"""
     assert r.trial_status=='locked'
     assert r.model_thickness==pytest.approx(r.calculated_thickness+.15)
     assert r.corner_clearance==pytest.approx(.282842712474619)
-    exported['copper']['pad_size']=1.6
+    exported['pcb']['thickness']=2.2
     stale=calculate(Design.from_mapping(exported))
     assert stale.trial_status=='stale'
     assert exported['trial_result']['value']==r.model_thickness
@@ -234,6 +236,18 @@ def _parity_cases(data):
     c = deepcopy(data); c["pcb"].update(opening_width=8.5, relief_diameter=4.4); c["package"]["width"] = 8
     c["boss"] = {"center_from_left": 18, "center_from_bottom": 14}
     cases["overlapping_relief_offset_boss"] = c
+    # O/J/K/R/S/T are process-fixed and V = D + 1 in both implementations.
+    c = deepcopy(data); c["pcb"]["relief_diameter"] = 3; c["copper"].update(pad_size=2, hole_diameter=3.5)
+    c["stack"]["pad_height"] = .2; c["layout"] = {"border_width": 2, "epad_size": 2, "web_width": .5, "hole_clearance": 9}
+    cases["fixed_values_applied"] = c
+    # Two Final PAs: the other PA's design and the 4-lead display setting travel with the file.
+    c = deepcopy(data); c["package"]["lead_count"] = 4
+    c["pa_set"] = {"active": 0, "same_part": False, "ai_project_id": "fdd",
+                   "items": [{"brand": "", "model": "A", "ai_component": "", "design": None},
+                             {"brand": "", "model": "B", "ai_component": "", "design": deepcopy(data)}]}
+    cases["two_pas"] = c
+    c = deepcopy(data); c["package"]["lead_count"] = 5; cases["lead_count_rejected"] = c
+    c = deepcopy(data); c["pa_set"] = {"active": 1, "items": [{"model": "A"}]}; cases["pa_set_active_rejected"] = c
     c = deepcopy(data); c["stack"]["lead_solder"] = .12; cases["edited_stack_rejected"] = c
     c = deepcopy(data); c["boss"] = {"height_mode": "manual", "total_height": .5}; cases["manual_height_rejected"] = c
     c = deepcopy(data); c["tolerances"] = {"pcb.unknown": {"minus": 0, "plus": 0}}; cases["unknown_tolerance_rejected"] = c

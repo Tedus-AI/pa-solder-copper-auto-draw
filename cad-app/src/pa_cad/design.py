@@ -17,6 +17,13 @@ def chamfer_for(pad):
 
 # Process values fixed by PPT p6 (A, B, D) and p8 (placement capability).
 FIXED_STACK = {"lead_solder": .1, "board_solder": .1, "flange_gap": .3}
+# Process-fixed O/J/K/R/S/T (web/src/design.js FIXED_VALUES): applied on every load,
+# older files with other values are brought to these values, not rejected.
+FIXED_VALUES = {("pcb", "relief_diameter"): 2.0, ("copper", "pad_size"): 1.5, ("stack", "pad_height"): .15,
+                ("layout", "border_width"): 1.0, ("layout", "epad_size"): 1.5, ("layout", "web_width"): .3}
+# Locating-hole clearance V = hanging-hole diameter D + 1 mm.
+HOLE_CLEARANCE_MARGIN = 1.0
+MAX_PAS = 2
 PLACEMENT_ALLOWANCE = .066
 ISO_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})")
 
@@ -39,6 +46,7 @@ class Package:
     width: float = 9.78
     max_tolerance: float = 0.127
     support_height: float = 1.57
+    lead_count: int = 6  # display only: 6 leads (two narrow top corner leads) or 4
 
 
 @dataclass(frozen=True)
@@ -154,6 +162,9 @@ class Design:
     project: Project = field(default_factory=Project)
     trial_result: dict = field(default_factory=lambda: {"choice":"middle", "locked":False, "value":None, "signature":None, "confirmed_at":None})
     part_numbers: dict = field(default_factory=empty_part_numbers)
+    # Several Final PAs (web/src/design.js normalizePaSet). The top level is the active
+    # PA; this exporter uses the top level only and carries pa_set along unchanged.
+    pa_set: dict | None = None
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -217,6 +228,10 @@ class Design:
                     continue
                 if name == "boss" and value is None:
                     continue
+                if name == "package" and f.name == "lead_count":
+                    if isinstance(value, bool) or value not in (4, 6):
+                        raise ValueError("PA 腳數須為 4 或 6")
+                    continue
                 if name == "pcb" and f.name in {"opening_mode", "opening_rule"}:
                     choices = {"auto", "manual"} if f.name == "opening_mode" else {"delta", "ampleon"}
                     if not isinstance(value, str) or value not in choices:
@@ -237,6 +252,11 @@ class Design:
             raise ValueError("PPT 第六頁：中凸台總高 L 固定依高度堆疊自動計算")
         if any(getattr(groups["stack"], key) != value for key, value in FIXED_STACK.items()):
             raise ValueError("PPT 第六頁的 A、B、D 採固定建議值 0.1／0.1／0.3 mm；調整 PCB 厚度與小凸台 K")
+        for (name, key), value in FIXED_VALUES.items():
+            groups[name] = replace(groups[name], **{key: value})
+        groups["layout"] = replace(groups["layout"],
+                                   hole_clearance=groups["copper"].hole_diameter + HOLE_CLEARANCE_MARGIN)
+        pa_set = validate_pa_set(data.get("pa_set"))
         tolerances = data.get("tolerances", {})
         if not isinstance(tolerances, dict):
             raise ValueError("tolerances 必須是 mapping")
@@ -260,7 +280,7 @@ class Design:
                 raise ValueError(f"{key} 公差來源須為文字")
         part_numbers = normalize_part_numbers(data.get("part_numbers"))
         design = cls(data["name"], **groups, tolerances=normalized, project=project, trial_result=trial,
-                     part_numbers=part_numbers)
+                     part_numbers=part_numbers, pa_set=pa_set)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))
@@ -278,6 +298,26 @@ class Design:
 
     def to_mapping(self) -> dict:
         return asdict(self)
+
+
+def validate_pa_set(value):
+    """Shape check of design.pa_set; the browser normalizes it (web/src/design.js)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) - {"active", "same_part", "ai_project_id", "items"}:
+        raise ValueError("PA 設定格式無效")
+    items = value.get("items")
+    if not isinstance(items, list) or not 1 <= len(items) <= MAX_PAS:
+        raise ValueError(f"PA 數量須為 1 至 {MAX_PAS}")
+    active = value.get("active", 0)
+    if isinstance(active, bool) or not isinstance(active, int) or not 0 <= active < len(items):
+        raise ValueError("目前 PA 編號無效")
+    for index, item in enumerate(items):
+        if not isinstance(item, dict) or set(item) - {"brand", "model", "ai_component", "design"}:
+            raise ValueError(f"PA{index + 1} 設定格式無效")
+        if index != active and not isinstance(item.get("design"), dict):
+            raise ValueError(f"PA{index + 1} 缺少設計尺寸")
+    return value
 
 
 def ceil_tenth(value: float) -> float:
