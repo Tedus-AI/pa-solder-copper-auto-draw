@@ -165,6 +165,8 @@ class Design:
     # Several Final PAs (web/src/design.js normalizePaSet). The top level is the active
     # PA; this exporter uses the top level only and carries pa_set along unchanged.
     pa_set: dict | None = None
+    # 鎖定設計 (web/src/design.js): the design is fixed and reviewed; at = ISO 8601 time.
+    design_lock: dict = field(default_factory=lambda: {"locked": False, "at": None})
 
     @classmethod
     def from_mapping(cls, data: dict) -> Design:
@@ -257,6 +259,11 @@ class Design:
         groups["layout"] = replace(groups["layout"],
                                    hole_clearance=groups["copper"].hole_diameter + HOLE_CLEARANCE_MARGIN)
         pa_set = validate_pa_set(data.get("pa_set"))
+        lock = data.get("design_lock") or {"locked": False, "at": None}
+        if (not isinstance(lock, dict) or set(lock) - {"locked", "at"} or not isinstance(lock.get("locked", False), bool)
+                or (lock.get("at") is not None and (not isinstance(lock["at"], str) or not ISO_TIMESTAMP.fullmatch(lock["at"])))):
+            raise ValueError("設計鎖定記錄格式無效")
+        design_lock = {"locked": True, "at": lock.get("at")} if lock.get("locked") else {"locked": False, "at": None}
         tolerances = data.get("tolerances", {})
         if not isinstance(tolerances, dict):
             raise ValueError("tolerances 必須是 mapping")
@@ -280,7 +287,7 @@ class Design:
                 raise ValueError(f"{key} 公差來源須為文字")
         part_numbers = normalize_part_numbers(data.get("part_numbers"))
         design = cls(data["name"], **groups, tolerances=normalized, project=project, trial_result=trial,
-                     part_numbers=part_numbers, pa_set=pa_set)
+                     part_numbers=part_numbers, pa_set=pa_set, design_lock=design_lock)
         if design.pcb.opening_mode == "auto":
             length, width = recommended_opening(design)
             design = replace(design, pcb=replace(design.pcb, opening_length=length, opening_width=width))

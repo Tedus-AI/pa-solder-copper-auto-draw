@@ -247,6 +247,8 @@ def _parity_cases(data):
                              {"brand": "", "model": "B", "ai_component": "", "design": deepcopy(data)}]}
     cases["two_pas"] = c
     c = deepcopy(data); c["package"]["lead_count"] = 5; cases["lead_count_rejected"] = c
+    c = deepcopy(data); c["design_lock"] = {"locked": True, "at": "2026-11-16T05:00:00.000Z"}; cases["design_locked"] = c
+    c = deepcopy(data); c["design_lock"] = {"locked": True, "at": "today"}; cases["design_lock_rejected"] = c
     c = deepcopy(data); c["pa_set"] = {"active": 1, "items": [{"model": "A"}]}; cases["pa_set_active_rejected"] = c
     c = deepcopy(data); c["stack"]["lead_solder"] = .12; cases["edited_stack_rejected"] = c
     c = deepcopy(data); c["boss"] = {"height_mode": "manual", "total_height": .5}; cases["manual_height_rejected"] = c

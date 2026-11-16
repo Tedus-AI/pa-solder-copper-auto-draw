@@ -223,3 +223,13 @@ test('PA set rules: count, active index, same part on PA1 and a complete design 
   const single = run({ active: 0, ai_project_id: 'p', items: [{ model: 'A' }] }).design.pa_set;
   assert.equal(single.same_part, false, 'one PA is never a same-part pair');
 });
+
+test('鎖定設計 is saved with the design and validated', () => {
+  assert.deepEqual(calculate(defaults).design.design_lock, { locked: false, at: null });
+  const locked = { ...structuredClone(defaults), design_lock: { locked: true, at: '2026-11-16T05:00:00.000Z' } };
+  assert.deepEqual(calculate(locked).design.design_lock, { locked: true, at: '2026-11-16T05:00:00.000Z' });
+  assert.deepEqual(calculate(JSON.parse(JSON.stringify(calculate(locked).design))).design.design_lock, locked.design_lock);
+  assert.deepEqual(calculate({ ...structuredClone(defaults), design_lock: { locked: false, at: '2026-11-16T05:00:00Z' } }).design.design_lock, { locked: false, at: null });
+  for (const bad of [{ locked: 'yes' }, { locked: true, at: 'today' }, { locked: true, by: 'me' }, []])
+    assert.throws(() => calculate({ ...structuredClone(defaults), design_lock: bad }), /設計鎖定/);
+});

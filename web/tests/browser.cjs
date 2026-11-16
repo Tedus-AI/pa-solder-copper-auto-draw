@@ -706,6 +706,29 @@ async function withDeadline(operation,ms,label){
     assert.match(await extra.locator('#viewer-stale').textContent(),/3D 仍是上次有效的示意：.+/);assert.equal(await extra.locator('#viewer').getAttribute('data-preview-valid'),'false');
     await extra.locator('#copper-base_length').fill('40');await extra.locator('#viewer-stale').waitFor({state:'hidden'});
     await extra.close();
+    // 鎖定設計: entered values read only (still locating dimensions), notes hidden, saved, unlock restores.
+    const locker=await browser.newPage({viewport:{width:1600,height:950},locale:'zh-TW'});locker.on('pageerror',e=>errors.push(e.message));
+    await locker.goto(url,{waitUntil:'networkidle'});
+    const readOnly=id=>locker.locator('#'+id).evaluate(e=>e.readOnly);
+    await locker.locator('#project-name').fill('鎖定測試');await locker.locator('#boss-center_from_left').fill('18');
+    await locker.locator('#alerts').waitFor();assert.equal(await locker.locator('#design-lock-text').textContent(),'鎖定設計');
+    await locker.locator('#design-lock').click();
+    assert.equal(await locker.locator('#design-lock').getAttribute('aria-pressed'),'true');assert.equal(await locker.locator('#alerts').isVisible(),false,'notes acknowledged');
+    for(const id of ['copper-base_length','boss-center_from_left','tol-copper-base_length-plus','pa-brand'])assert.equal(await readOnly(id),true,id);
+    for(const id of ['pcb-auto','pcb-rule','boss-size-auto','boss-center','tolerance-unlock','trial-lock','pa-leads'])assert.equal(await locker.locator('#'+id).isDisabled(),true,id);
+    assert.equal(await locker.locator('[data-hole-corner="top_left"]').isDisabled(),true);
+    await locker.locator('#copper-base_length').focus();await locker.keyboard.type('9');
+    assert.equal(await locker.locator('#copper-base_length').inputValue(),'40');assert.equal(await locker.locator('#viewer').getAttribute('data-dimension'),'copper.base_length','locked fields still locate their dimension');
+    await locker.locator('.control-heading').screenshot({path:path.join(output,'design-locked.png')});
+    await locker.waitForFunction(()=>/^(已自動儲存|已儲存) /.test(document.getElementById('project-save-status').textContent),null,{timeout:10000});
+    await locker.reload({waitUntil:'networkidle'});
+    assert.equal(await locker.locator('#design-lock').getAttribute('aria-pressed'),'true','saved with the project');assert.equal(await readOnly('copper-base_length'),true);
+    await locker.locator('#design-lock').click();
+    assert.equal(await readOnly('copper-base_length'),false);assert.equal(await readOnly('pcb-opening_length'),true,'auto M stays derived');assert.equal(await readOnly('stack-lead_solder'),true,'fixed A stays locked');
+    assert.equal(await locker.locator('#alerts').isVisible(),true);assert.equal(await locker.locator('#pcb-auto').isDisabled(),false);
+    await locker.locator('#copper-base_length').fill('5');await locker.locator('#viewer-stale').waitFor();
+    await locker.locator('#design-lock').click();assert.equal(await locker.locator('#design-lock').getAttribute('aria-pressed'),'false','an invalid design cannot be locked');
+    await locker.close();
     // 規格書 viewer (AI-Thermal's): floating, file switcher, PDF thumbnails, move, maximize, Esc. Fake SharePoint.
     const css=fs.readdirSync(path.join(__dirname,'..','dist','assets')).filter(f=>f.endsWith('.css')).map(f=>fs.readFileSync(path.join(__dirname,'..','dist','assets',f),'utf8')).join('\n');
     const viewerPage=await browser.newPage({viewport:{width:1600,height:950}});viewerPage.on('pageerror',e=>errors.push(e.message));
