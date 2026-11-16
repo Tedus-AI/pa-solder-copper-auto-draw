@@ -355,7 +355,7 @@ select {
   background: var(--surface);
 }
 .pa-card .brand-f {
-  flex: 0 1 108px;
+  flex: 0 1 100px;
 }
 .pa-card .model-f {
   flex: 1 1 220px;
@@ -654,8 +654,8 @@ select {
   min-width: 0;
 }
 .project-toolbar select {
-  flex: 0 0 230px;
-  width: 230px;
+  flex: 0 0 200px;
+  width: 200px;
 }
 .project-toolbar button {
   padding: 0 10px;
@@ -2492,8 +2492,8 @@ main {
     display: none;
   }
   .project-toolbar select {
-    flex-basis: 178px;
-    width: 178px;
+    flex-basis: 160px;
+    width: 160px;
   }
   .project-toolbar button {
     padding: 0 8px;
@@ -2515,8 +2515,12 @@ main {
   .pa-card .brand-f input {
     padding-left: 8px;
   }
+  /* The model gets the room: 型號 is shown as the empty field's placeholder and in the tooltip. */
   .pa-card .model-f > span {
-    padding: 0 5px 0 7px;
+    display: none;
+  }
+  .pa-card .model-f input {
+    padding-left: 8px;
   }
   .spec-btn {
     padding: 0 7px;

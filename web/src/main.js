@@ -226,7 +226,7 @@ function renderPaCards(rebuild=false){
     box.replaceChildren(...paItems.map((item,i)=>{
       const card=document.createElement('div');card.className='pa-card';card.dataset.pa=i;
       const brandId=i?`pa-brand-${i+1}`:'pa-brand',modelId=i?`pa-model-${i+1}`:'pa-model';
-      card.innerHTML=`<button type="button" class="pa-tag" data-pa-select="${i}">${paLabel(i)}</button><label for="${brandId}" class="bar-field brand-f" title="${paLabel(i)} 品牌"><span>品牌</span><input form="design-form" id="${brandId}" data-pa="${i}" maxlength="100" placeholder="例：NXP" autocomplete="off"></label><label for="${modelId}" class="bar-field model-f" title="${paLabel(i)} 型號"><span>型號</span><input form="design-form" id="${modelId}" data-pa="${i}" maxlength="100" placeholder="輸入 PA 型號" autocomplete="off"></label><button type="button" class="spec-btn" data-pa-spec="${i}">📄<span class="t"> 規格書</span><span class="n"></span></button>`;
+      card.innerHTML=`<button type="button" class="pa-tag" data-pa-select="${i}">${paLabel(i)}</button><label for="${brandId}" class="bar-field brand-f" title="${paLabel(i)} 品牌"><span>品牌</span><input form="design-form" id="${brandId}" data-pa="${i}" maxlength="100" placeholder="例 NXP" autocomplete="off"></label><label for="${modelId}" class="bar-field model-f" title="${paLabel(i)} 型號"><span>型號</span><input form="design-form" id="${modelId}" data-pa="${i}" maxlength="100" placeholder="型號" autocomplete="off"></label><button type="button" class="spec-btn" data-pa-spec="${i}">📄<span class="t"> 規格書</span><span class="n"></span></button>`;
       card.querySelector(`#${brandId}`).value=item.brand;card.querySelector(`#${modelId}`).value=item.model;
       return card;
     }));
