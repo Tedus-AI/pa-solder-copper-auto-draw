@@ -79,10 +79,13 @@ test('reference assembly stack exactly preserves A B C D K and SPH',()=>{
   near(z.pad-z.boss,defaults.stack.pad_height);
   near(z.lead-z.flange,defaults.package.support_height);
 });
+test('PA 封裝 dimensions open in the PA-only view',()=>{
+  for(const key of ['package.length','package.width','package.support_height'])assert.equal(dimensionFor(key,r).mode,'pa',key);
+});
 test('every numeric cell maps to an actual dimension segment of the correct length',()=>{
   for(const[group,[,names]]of Object.entries(fields))for(const key of Object.keys(names)){
     const dim=dimensionFor(`${group}.${key}`,r,g);assert.ok(dim,`${group}.${key}`);
     near(Math.hypot(...dim.a.map((n,i)=>n-dim.b[i])),dim.value);
-    assert.ok(['assembly','copper','preform','layout'].includes(dim.mode));
+    assert.ok(['assembly','pa','copper','preform','layout'].includes(dim.mode));
   }
 });
