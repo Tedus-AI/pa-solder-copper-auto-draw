@@ -716,6 +716,22 @@ export class SharePointSync {
     return (await res.json()).webUrl || null;
   }
 
+  /**
+   * A file on the Thermal-Spec-DB site (AI-Thermal's SPEC uploads), for the in-page viewer:
+   * { downloadUrl, webUrl, name, size } or null when it is not there. Read only.
+   */
+  async fileMeta(path) {
+    await this.resolveSite(true);
+    const res = await this.graph(this.byPath(path), { interactive: true, ok: s => s === 404 });
+    if (res.status === 404) return null;
+    const item = await res.json();
+    return {
+      downloadUrl: item['@microsoft.graph.downloadUrl'] || null,
+      webUrl: item.webUrl || null,
+      name: item.name || '',
+      size: item.size || 0,
+    };
+  }
   /** SharePoint web address of a file on the Thermal-Spec-DB site (AI-Thermal's SPEC uploads). */
   async fileUrl(path) {
     await this.resolveSite(true);

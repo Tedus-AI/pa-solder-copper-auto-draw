@@ -22,6 +22,7 @@ import {chamferFor,TRIAL_DELTA,emptyTrial,trialChoices} from './preform-rules.js
 import { createCalculationGuide } from './calculation-guide.js';
 import { setupVersionUI } from './app-version.js';
 import { setupFullscreen } from './fullscreen.js';
+import { createSpecViewer } from './spec-viewer.js';
 import { AutoSaver, autosaveMode, autosaveHint, readAutosavePreference, writeAutosavePreference } from './autosave.js';
 
 const $ = id => document.getElementById(id), base = import.meta.env.BASE_URL;
@@ -79,10 +80,10 @@ document.addEventListener('keydown',event=>{if(event.key==='Escape')hideFormula(
 
 $('creo-guide').href=`${base}WINDOWS_CREO7.md`;
 const viewer=new CADViewer($('viewer'),(mode,refs,exploded)=>{
-  for(const m of ['assembly','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
+  for(const m of ['assembly','pa','copper','preform','layout'])$(`tab-${m}`).classList.toggle('active',m===mode);
   for(const component of ['copper','preform','pcb','pa','epad'])$(`ref-${component}`).checked=refs[component];
   $('explode').checked=exploded;
-  $('reference-note').textContent=mode==='assembly'?'PCB／PA 僅位置參考，不參與3D出圖':mode==='layout'?'綠色＝綠漆覆蓋；灰色＝E-PAD開窗，單獨輸出Layout DXF':'目前零件的3D出圖預覽';
+  $('reference-note').textContent=mode==='pa'?'PA 封裝僅位置參考，不參與3D出圖':mode==='assembly'?'PCB／PA 僅位置參考，不參與3D出圖':mode==='layout'?'綠色＝綠漆覆蓋；灰色＝E-PAD開窗，單獨輸出Layout DXF':'目前零件的3D出圖預覽';
 },dimension=>{
   document.querySelectorAll('.dimension-active').forEach(el=>el.classList.remove('dimension-active'));
   $('dimension-label').dataset.active=String(!!dimension);
@@ -286,23 +287,11 @@ function applyAiProject(project){
   });
   renderPaUi();return changed;
 }
-async function openSpec(spec){
-  const tab=window.open('','_blank');
-  try{const url=await spSync.fileUrl(spec.path);if(url&&tab)tab.location.href=url;else{tab?.close();projectMessage(`SharePoint 上找不到規格書 ${spec.name}`,true);}}
-  catch(e){tab?.close();projectMessage(`無法開啟規格書：${e.message}`,true);}
-}
-const specMenu=document.createElement('div');specMenu.className='spec-menu';specMenu.setAttribute('role','menu');specMenu.hidden=true;document.body.append(specMenu);
-function showSpecMenu(button,specs){
-  specMenu.replaceChildren(...specs.map(spec=>{const item=document.createElement('button');item.type='button';item.setAttribute('role','menuitem');item.textContent=`📄 ${spec.name}`;item.title=spec.path;item.addEventListener('click',()=>{specMenu.hidden=true;openSpec(spec);});return item;}));
-  specMenu.hidden=false;const rect=button.getBoundingClientRect();
-  specMenu.style.left=Math.max(8,Math.min(innerWidth-specMenu.offsetWidth-8,rect.left))+'px';specMenu.style.top=rect.bottom+4+'px';
-  specMenu.querySelector('button')?.focus();
-}
-document.addEventListener('pointerdown',event=>{if(!specMenu.hidden&&!specMenu.contains(event.target)&&!event.target.closest('.spec-btn'))specMenu.hidden=true;});
-document.addEventListener('keydown',event=>{if(event.key==='Escape')specMenu.hidden=true;});
+// 規格書 open in the in-page viewer, as in AI-Thermal (several files: a switcher in the viewer).
+const specViewer=createSpecViewer({fileMeta:path=>spSync.fileMeta(path)});
 $('pa-cards').addEventListener('click',event=>{
   const spec=event.target.closest('[data-pa-spec]');
-  if(spec){const specs=specsFor(Number(spec.dataset.paSpec));if(specs.length===1)openSpec(specs[0]);else if(specs.length)showSpecMenu(spec,specs);return;}
+  if(spec){const i=Number(spec.dataset.paSpec),specs=specsFor(i);if(specs.length)specViewer.open(specs,0,`${paLabel(i)} · ${paItems[i].model||paItems[i].ai_component}`);return;}
   const tag=event.target.closest('[data-pa-select]');if(tag)switchPa(Number(tag.dataset.paSelect));
 });
 $('pa-switch').addEventListener('click',event=>{const button=event.target.closest('[data-pa-select]');if(button)switchPa(Number(button.dataset.paSelect));});
@@ -333,13 +322,19 @@ function formValues(){
   return d;
 }
 function fill(d){loadPaState(d);fillDesign(d);renderPaUi(true);}
+// The copper needs at least one hanging hole: the last checked corner cannot be cleared.
+function guardHoleCorners(){
+  const boxes=[...document.querySelectorAll('[data-hole-corner]')],checked=boxes.filter(box=>box.checked);
+  for(const box of boxes){const last=checked.length===1&&box.checked;box.disabled=last;box.closest('label').title=last?'至少要保留一個吊掛孔角位':'';}
+}
+document.querySelector('.hole-selection').addEventListener('change',guardHoleCorners);
 function fillDesign(d){
   leadCount=d.package?.lead_count??6;renderLeads();
   trialRecord=structuredClone(d.trial_result??emptyTrial());partNumbers=structuredClone(d.part_numbers??emptyPartNumbers());renderPartNumber();
   projectMetadataValid=true;$('name').value=d.name;
   $('project-name').value=d.project?.name??d.name??'未命名專案';$('project-id').value=d.project?.project_id??'';
   for(const path of allPaths){const[group,key]=path.split('.');inputFor(path).value=d[group][key]??'';const pair=getTolerance(d,path);for(const sign of ['minus','plus'])$(`tol-${path.replace('.','-')}-${sign}`).value=unknownTolerance(path)&&pair[sign]===0?'':pair[sign];}
-  document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));
+  document.querySelectorAll('[data-hole-corner]').forEach(e=>e.checked=(d.copper.hole_corners??defaults.copper.hole_corners).includes(e.dataset.holeCorner));guardHoleCorners();
   $('pcb-auto').checked=d.pcb.opening_mode==='auto';$('pcb-rule').value=d.pcb.opening_rule;
   $('boss-size-auto').checked=d.boss.size_mode==='auto';
   tolerancesUnlocked=false;updateToleranceLock();syncLinkedFields(d);
@@ -385,11 +380,13 @@ function layoutFor(r){
 function refreshPreview(showError=false){
   try{
     const r=calculate(syncLinkedFields(formValues())),layout=layoutFor(r);draft={results:r,layout};
-    viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;
+    viewer.setDesign(r,layout);renderMetrics(r);$('viewer-placeholder').hidden=true;$('viewer-stale').hidden=true;
     refreshExportButtons();$('viewer').dataset.previewValid='true';
     $('model-size').textContent=[['E',r.design.copper.base_length],['F',r.design.copper.base_width],['G',r.design.copper.base_thickness]].map(([name,value])=>formatDimension(name,value)).join(' · ');
     return draft;
-  }catch(e){draft=null;viewer.clearAnnotation();if(!busy)setBuildState('invalid');refreshExportButtons();$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);return null;}
+  }catch(e){draft=null;viewer.clearAnnotation();if(!busy)setBuildState('invalid');refreshExportButtons();$('viewer').dataset.previewValid='false';if(showError)error(e.message);status(`參數未完成：${e.message}`);
+    // The 3D keeps the last valid design: say so, so it is not read as the current input.
+    $('viewer-stale').textContent=`⚠ 輸入有誤，3D 仍是上次有效的示意：${e.message}`;$('viewer-stale').hidden=false;return null;}
 }
 function invalidate(){
   revision++;result=null;error('');refreshExportButtons();
@@ -561,7 +558,7 @@ $('design-form').addEventListener('focusin',event=>{
     clearTimeout(previewTimer);refreshPreview();if(event.target.classList.contains('tolerance-input'))viewer.selectTolerance(event.target.dataset.fieldKey);else viewer.selectDimension(event.target.name);
   }
 });
-for(const mode of ['assembly','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
+for(const mode of ['assembly','pa','copper','preform','layout'])$(`tab-${mode}`).addEventListener('click',()=>{
   viewer.setMode(mode);if(['copper','preform','layout'].includes(mode))selectExportPart(mode);
 });
 $('export-part').addEventListener('change',event=>selectExportPart(event.target.value));

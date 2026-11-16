@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { octagon } from './design.js';
 import { dimensionFor, dimensionLabel, referenceLevels } from './dimensions.js';
 import { paReference } from './pa-reference.js';
+import { featureEdges } from './feature-edges.js';
 import { cameraView, createCADCamera } from './camera-views.js';
 import { annotationLayout, featureLeader, overlaps } from './annotation-layout.js';
 import { ARROW_LENGTH, ARROW_HALF_WIDTH, OUTSIDE_TAIL } from './dimension-arrows.js';
@@ -90,7 +91,7 @@ export class CADViewer {
     mesh.castShadow=opacity>=.9&&component!=='pcb';mesh.receiveShadow=true;
     mesh.userData.component=component;this.models.add(mesh);
     const edgeColor=component==='copper'?0x4e301e:component==='pa'?0x2a3540:component==='preform'?0x5e6970:0x365747;
-    const edge=new THREE.LineSegments(new THREE.EdgesGeometry(geometry,24),new THREE.LineBasicMaterial({color:edgeColor,transparent:true,opacity:Math.min(.86,opacity+.08)}));edge.position.copy(mesh.position);edge.userData.component=component;this.models.add(edge);
+    const edge=new THREE.LineSegments(featureEdges(geometry,24),new THREE.LineBasicMaterial({color:edgeColor,transparent:true,opacity:Math.min(.86,opacity+.08)}));edge.position.copy(mesh.position);edge.userData.component=component;this.models.add(edge);
     return {mesh,edge};
   }
   box(size,center,color,opacity=1,component='copper') {
@@ -122,9 +123,10 @@ export class CADViewer {
     if(!this.r)return;
     dispose(this.models);this.models.clear();
     const r=this.r,d=r.design,c=d.copper,p=d.package,z=referenceLevels(r),layout=this.layout,center=r.boss_center||[0,0];
-    const assembly=this.mode==='assembly', mask=this.mode==='layout'&&this.refs.epad;
+    // 'pa': the PA package alone (PA 封裝), where it sits in the assembly, for its dimensions.
+    const assembly=this.mode==='assembly',paOnly=this.mode==='pa', mask=this.mode==='layout'&&this.refs.epad;
     const solderZ=assembly?z.boss+(this.exploded?3:0):0;
-    if(this.mode!=='preform'&&this.refs.copper) {
+    if(this.mode!=='preform'&&!paOnly&&this.refs.copper) {
       if(!this.cadPart('copper',0,mask?.2:1)) {
         this.extrude(layout.copperProfile,c.base_thickness,0,copperTones[0],mask?.2:1);
         this.box([r.boss_length,r.boss_width,r.boss_lower_height],[center[0],center[1],z.base+r.boss_lower_height/2],copperTones[1],mask?.2:1);
@@ -138,10 +140,10 @@ export class CADViewer {
         this.extrude([[ring]],r.model_thickness,solderZ,0xc5cdd1,assembly?.7:1,'preform');
       }
     }
-    if(assembly) {
-      if(this.refs.pcb)this.extrude(layout.board,d.pcb.thickness,z.pcbBottom+(this.exploded?6:0),0x338868,.25,'pcb');
-      if(this.refs.pa) {
-        const shift=z.flange+(this.exploded?12:0),pa=paReference(p,r.pa_envelope),f=pa.flange;
+    if(assembly||paOnly) {
+      if(assembly&&this.refs.pcb)this.extrude(layout.board,d.pcb.thickness,z.pcbBottom+(this.exploded?6:0),0x338868,.25,'pcb');
+      if(this.refs.pa||paOnly) {
+        const shift=z.flange+(assembly&&this.exploded?12:0),pa=paReference(p,r.pa_envelope),f=pa.flange;
         const flange=new THREE.Shape(),x=f.length/2,y=f.width/2,q=f.radius;
         flange.moveTo(-x+q,-y);flange.lineTo(x-q,-y);flange.quadraticCurveTo(x,-y,x,-y+q);flange.lineTo(x,y-q);flange.quadraticCurveTo(x,y,x-q,y);flange.lineTo(-x+q,y);flange.quadraticCurveTo(-x,y,-x,y-q);flange.lineTo(-x,-y+q);flange.quadraticCurveTo(-x,-y,-x+q,-y);
         const geometry=new THREE.ExtrudeGeometry(flange,{depth:f.depth,bevelEnabled:false,curveSegments:16});geometry.translate(center[0],center[1],shift);this.mesh(geometry,0xbe7a44,1,'pa').mesh.userData.feature='pa_flange';
@@ -157,13 +159,13 @@ export class CADViewer {
       }
     }
     if(this.refs.epad&&(assembly||this.mode==='layout')) {this.plane(layout.mask,z.base+.025,0x277b53,'mask');this.plane(layout.pads,z.base+.028,0xc4c9c1,'epad');}
-    this.scale=this.mode==='preform'?Math.max(r.boss_length,r.boss_width):Math.max(c.base_length,c.base_width)+(assembly?10:4);
+    this.scale=this.mode==='preform'?Math.max(r.boss_length,r.boss_width):paOnly?Math.max(p.length,p.width)+8:Math.max(c.base_length,c.base_width)+(assembly?10:4);
     if(this.keyLight){const extent=Math.max(25,this.scale*.9),camera=this.keyLight.shadow.camera;Object.assign(camera,{left:-extent,right:extent,top:extent,bottom:-extent,near:.1,far:Math.max(300,this.scale*6)});camera.updateProjectionMatrix();this.keyLight.position.set(this.scale*.6,-this.scale*.85,this.scale*1.3);this.renderer.shadowMap.needsUpdate=true;}
-    const top=assembly?Math.max(z.pcbTop,z.flange+paReference(p).totalHeight)+(this.exploded?12:0):this.mode==='preform'?r.model_thickness:z.pad;
+    const top=paOnly?z.flange+paReference(p).totalHeight:assembly?Math.max(z.pcbTop,z.flange+paReference(p).totalHeight)+(this.exploded?12:0):this.mode==='preform'?r.model_thickness:z.pad;
     this.target.set(0,0,top/2);
     this.models.updateMatrixWorld(true);this.worldBounds=new THREE.Box3().setFromObject(this.models);
     if(!this.worldBounds.isEmpty())this.worldBounds.getCenter(this.target);
-    this.el.dataset.referenceParts=assembly?[...(this.refs.pcb?['pcb']:[]),...(this.refs.pa?['pa']:[])].join(','):'';
+    this.el.dataset.referenceParts=paOnly?'pa':assembly?[...(this.refs.pcb?['pcb']:[]),...(this.refs.pa?['pa']:[])].join(','):'';
     this.el.dataset.viewMode=this.mode;
     this.el.dataset.referenceOpening=String(layout.cutout.length>0);
     // Report the components actually present in the scene, including all edge objects.

@@ -18,9 +18,9 @@ export function dimensionFor(key,r,layout){
  const candidates=layout?.cells.filter(cell=>cell.full)||[],cell=candidates.find(cell=>candidates.some(other=>Math.abs(other.y-cell.y)<1e-6&&Math.abs(other.x-cell.x-layout.pitch)<1e-6))||candidates[0]||{x:cx,y:cy+b.opening_width/2+2};
  const v=(a,b,mode,value,note='',offset=[0,0,1.5])=>({a,b,mode,value,note,offset,key});
  const map={
- 'package.length':()=>v([-p.length/2,-p.width/2,z.flange],[p.length/2,-p.width/2,z.flange],'assembly',p.length,'PA 金屬底座長度'),
- 'package.width':()=>v([p.length/2,-p.width/2,z.flange],[p.length/2,p.width/2,z.flange],'assembly',p.width,'PA 金屬底座寬度'),
- 'package.support_height':()=>v([pinX,p.width/2,z.flange],[pinX,p.width/2,z.lead],'assembly',p.support_height,'SPH：PA 金屬底座底面 → PIN 底面'),
+ 'package.length':()=>v([-p.length/2,-p.width/2,z.flange],[p.length/2,-p.width/2,z.flange],'pa',p.length,'PA 金屬底座長度'),
+ 'package.width':()=>v([p.length/2,-p.width/2,z.flange],[p.length/2,p.width/2,z.flange],'pa',p.width,'PA 金屬底座寬度'),
+ 'package.support_height':()=>v([pinX,p.width/2,z.flange],[pinX,p.width/2,z.lead],'pa',p.support_height,'SPH：PA 金屬底座底面 → PIN 底面'),
  'pcb.opening_length':()=>v([-b.opening_length/2,0,z.pcbTop],[b.opening_length/2,0,z.pcbTop],'assembly',b.opening_length,'PCB 開孔長度 M'),
  'pcb.opening_width':()=>v([0,-b.opening_width/2,z.pcbTop],[0,b.opening_width/2,z.pcbTop],'assembly',b.opening_width,'PCB 開孔寬度 N'),
  'pcb.thickness':()=>v([b.opening_length/2+2,0,z.pcbBottom],[b.opening_length/2+2,0,z.pcbTop],'assembly',b.thickness,'PCB 板厚 C'),

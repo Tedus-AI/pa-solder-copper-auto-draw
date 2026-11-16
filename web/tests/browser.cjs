@@ -358,6 +358,7 @@ async function withDeadline(operation,ms,label){
     await page.locator('#ref-pa').uncheck();assert.deepEqual(await visible(),new Set());
     await page.locator('#package-length').focus();assert.deepEqual(await visible(),new Set(['pa']));
     assert.equal(await page.locator('#ref-pa').isChecked(),true,'Selecting a PA dimension reveals its reference');
+    assert.equal(await page.locator('#viewer').getAttribute('data-view-mode'),'pa','PA dimensions open the PA 封裝 view');await page.locator('#tab-assembly').click();
     for(const name of ['copper','preform','pcb'])await page.locator(`#ref-${name}`).check();
     for(const component of ['copper','preform','pcb','pa']){
       const button=page.locator(`[data-transparency=${component}]`),before=await button.getAttribute('aria-pressed');await button.click();assert.equal(await page.locator(`#ref-${component}`).isChecked(),true);const opacity=JSON.parse(await page.locator('#viewer').getAttribute('data-component-opacities'))[component];assert.deepEqual(opacity,[before==='true'?1:.18]);await button.click();
@@ -632,7 +633,10 @@ async function withDeadline(operation,ms,label){
     assert.equal(await multi.locator('#duplex-value').textContent(),'FDD 100%');
     assert.equal(await value('pa-model'),'WGC18630-Final-B3');assert.equal(await value('pa-model-2'),'WGC-22630-Final-B1');
     assert.equal(await multi.locator('[data-pa-spec="0"]').isDisabled(),false);assert.match(await multi.locator('[data-pa-spec="1"]').textContent(),/2 份/);
-    await multi.locator('[data-pa-spec="1"]').click();assert.equal(await multi.locator('.spec-menu button').count(),2,'two specifications: choose one');await multi.keyboard.press('Escape');
+    await multi.locator('[data-pa-spec="1"]').click();
+    assert.equal(await multi.locator('.spec-view-tab').count(),2,'two specifications: switch between them in the viewer');
+    assert.equal(await multi.locator('.spec-view-title').textContent(),'b.pdf');assert.match(await multi.locator('.spec-view-sub').textContent(),/^PA2 · WGC-22630-Final-B1/);
+    await multi.locator('.spec-view-btn.primary').click();assert.equal(await multi.locator('.spec-view-layer').isVisible(),false);
     await multi.locator('#pa-brand').fill('WGC');await multi.locator('#pa-brand-2').fill('WGC');
     for(const width of [1920,1536]){
       await multi.setViewportSize({width,height:width===1920?1080:864});
@@ -688,6 +692,41 @@ async function withDeadline(operation,ms,label){
     await switcher.locator('#project-select').selectOption({label:(await switcher.locator('#project-select option').allTextContents()).find(t=>t.startsWith('專案A'))});
     assert.equal(await E(),'41');assert.equal(await switcher.locator('#project-name').inputValue(),'專案A');
     await switcher.close();
+    // PA 封裝 view, hanging-hole guard and the notice on an invalid input.
+    const extra=await browser.newPage({viewport:{width:1600,height:950},locale:'zh-TW'});extra.on('pageerror',e=>errors.push(e.message));
+    await extra.goto(url,{waitUntil:'networkidle'});
+    await extra.locator('#tab-pa').click();assert.equal(await extra.locator('#viewer').getAttribute('data-view-mode'),'pa');assert.equal(await extra.locator('#viewer').getAttribute('data-visible-components'),'pa');
+    await extra.locator('#tab-assembly').click();await extra.locator('#package-length').focus();
+    assert.equal(await extra.locator('#viewer').getAttribute('data-view-mode'),'pa','PA dimensions open the PA 封裝 view');assert.match(await extra.locator('#tab-pa').getAttribute('class'),/active/);
+    await extra.locator('.viewer-panel').screenshot({path:path.join(output,'pa-package-view.png')});
+    await extra.locator('[data-hole-corner="bottom_left"]').uncheck();
+    assert.equal(await extra.locator('[data-hole-corner="top_right"]').isDisabled(),true,'the last hanging hole cannot be cleared');
+    await extra.locator('[data-hole-corner="top_left"]').check();assert.equal(await extra.locator('[data-hole-corner="top_right"]').isDisabled(),false);
+    await extra.locator('#copper-base_length').fill('5');await extra.locator('#viewer-stale').waitFor();
+    assert.match(await extra.locator('#viewer-stale').textContent(),/3D 仍是上次有效的示意：.+/);assert.equal(await extra.locator('#viewer').getAttribute('data-preview-valid'),'false');
+    await extra.locator('#copper-base_length').fill('40');await extra.locator('#viewer-stale').waitFor({state:'hidden'});
+    await extra.close();
+    // 規格書 viewer (AI-Thermal's): floating, file switcher, PDF thumbnails, move, maximize, Esc. Fake SharePoint.
+    const css=fs.readdirSync(path.join(__dirname,'..','dist','assets')).filter(f=>f.endsWith('.css')).map(f=>fs.readFileSync(path.join(__dirname,'..','dist','assets',f),'utf8')).join('\n');
+    const viewerPage=await browser.newPage({viewport:{width:1600,height:950}});viewerPage.on('pageerror',e=>errors.push(e.message));
+    await viewerPage.setContent(`<!doctype html><meta charset="utf-8"><style>${css}</style><body><input id="under" value="page"></body>`);
+    await viewerPage.addScriptTag({type:'module',content:fs.readFileSync(path.join(__dirname,'..','src','spec-viewer.js'),'utf8')+`
+      window.metaCalls=[];window.viewer=createSpecViewer({fileMeta:async p=>{metaCalls.push(p);return{downloadUrl:'https://download/'+p,webUrl:'https://sp/'+p,name:p.split('/').pop(),size:2400000};},
+        fetchImpl:async()=>new Response(new TextEncoder().encode('%PDF-1.4\\n%%EOF'))});
+      viewer.open([{path:'/SPEC/a.pdf',name:'a.pdf'},{path:'/SPEC/b.docx',name:'b.docx'}],0,'PA2 · WGC-22630-Final-B1');`});
+    await viewerPage.locator('.spec-view-body iframe').waitFor();
+    assert.match(await viewerPage.locator('.spec-view-body iframe').getAttribute('src'),/^blob:.*#toolbar=1&navpanes=1&pagemode=thumbs$/);
+    assert.match(await viewerPage.locator('.spec-view-sub').textContent(),/PA2 · WGC-22630-Final-B1\u3000·\u3000第 1 \/ 2 份\u3000·\u30002\.3 MB/);
+    await viewerPage.locator('#under').fill('still editable');assert.equal(await viewerPage.locator('#under').inputValue(),'still editable','not modal');
+    await viewerPage.locator('.spec-view-tab').nth(1).click();await viewerPage.locator('.spec-view-msg a').waitFor();
+    assert.match(await viewerPage.locator('.spec-view-msg a').getAttribute('href'),/^https:\/\/sp\/\/SPEC\/b\.docx$/,'Office files open in Office Online');
+    const before=await viewerPage.locator('.spec-view').boundingBox(),head=await viewerPage.locator('.spec-view-head').boundingBox();
+    await viewerPage.mouse.move(head.x+40,head.y+20);await viewerPage.mouse.down();await viewerPage.mouse.move(head.x-160,head.y+60,{steps:4});await viewerPage.mouse.up();
+    const after=await viewerPage.locator('.spec-view').boundingBox();assert.ok(Math.abs(after.x-before.x+200)<2&&Math.abs(after.y-before.y-40)<2,'moved by its title bar');
+    await viewerPage.locator('.spec-view-head').dblclick({position:{x:40,y:20}});assert.equal(await viewerPage.locator('.spec-view').evaluate(e=>e.classList.contains('maximized')),true);
+    await viewerPage.locator('#under').focus();await viewerPage.keyboard.press('Escape');assert.equal(await viewerPage.locator('.spec-view-layer').isVisible(),true,'Esc outside the viewer leaves it open');
+    await viewerPage.locator('.spec-view').focus();await viewerPage.keyboard.press('Escape');assert.equal(await viewerPage.locator('.spec-view-layer').isVisible(),false);
+    await viewerPage.close();
     assert.deepEqual(errors, []);
     const coverage=liveSmoke?'eight representative dimensions':shardCount>1?`${annotationNames.length} dimensions (shard ${shardIndex+1}/${shardCount})`:'all 32 dimensions';
     console.log(`PASS: ${url} — ${coverage} outside actual model bounds in seven orthographic views and on mobile, true SPH datums, fixed dark text with plain markers, visibility, linked rules, CAD downloads and STEP roundtrip.`);
